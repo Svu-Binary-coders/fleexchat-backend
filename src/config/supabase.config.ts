@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { createClient } from "@supabase/supabase-js";
 import ServiceError from "../helper/servicesError.helper.js";
 const SUPABASE_URL = process.env.SUPABASE_URL;

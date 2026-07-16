@@ -13,7 +13,8 @@ import { loggerMiddleware } from "./config/sequrity/logger.js";
 import { securityMiddleware } from "./config/sequrity/helmet.js";
 import connectDB from "./config/mongoDB.config.js";
 import connectRedis from "./config/redis.config.js";
-
+import authRoutes from "./routes/auth.routes.js";
+import otpRoutes from "./routes/otp.routes.js";
 // Middleware to parse JSON bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -23,10 +24,14 @@ app.use(compressionMiddleware);
 app.use(corsMiddleware);
 app.use(loggerMiddleware);
 app.use(securityMiddleware);
-app.set("trust proxy", 1); // trust first proxy
+app.set("trust proxy", 2); // trust first proxy (cloudflare, nginx, etc.)
 // connct db
 connectDB();
 connectRedis;
+
+// routs
+app.use("/auth", authRoutes);
+app.use("/otp", otpRoutes);
 
 // 404 handler
 app.use((req, res) => {
