@@ -11,10 +11,11 @@ import {
 } from "../../services/chat/msssageSave.socket.services.js";
 import { saveChatRoom } from "../../services/chat/user.chat.services.js";
 import { MessageType } from "../../enums/chat.enums.js";
+import { getInternalUuid } from "../../redis/getInternalUserUuid.js";
 
 export const registerChatHandlers = (io: Server, socket: Socket) => {
   // ===============================================
-  // ১. Send Message
+  //  Send Message
   // ===============================================
   socket.on("send_message", async (messageData, callback) => {
     try {
@@ -30,7 +31,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         disappearingDuration,
       } = messageData;
 
-      const cleanSenderId = socket.data.userId; // PostgreSQL UUID
+      const cleanSenderId = socket.data.userId; // এটি আপনার UUID (DB Logic এর জন্য)
 
       const hasAttachment =
         attachment && Array.isArray(attachment) && attachment.length > 0;
@@ -55,18 +56,15 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         return;
       }
 
-      let activeChatId = chatRoomId;
-
-      // নতুন ১-টু-১ চ্যাট হলে আগে চ্যাট রুম তৈরি করে নেওয়া (PostgreSQL)
-      if (!activeChatId && receiverId) {
-        const chatRoomInfo = await saveChatRoom(
-          cleanSenderId,
-          receiverId.trim(),
-        );
-        activeChatId = chatRoomInfo.chatRoomId; // PostgreSQL UUID
+      // [Step 1] Resolving ChatRoom (Using UUID internally)
+      let customChatId = chatRoomId;
+      if (!customChatId && receiverId) {
+        const receiverUUId = await getInternalUuid(receiverId);
+        const chatRoomInfo = await saveChatRoom(cleanSenderId, receiverUUId);
+        customChatId = chatRoomInfo.customChatId;
       }
 
-      if (!activeChatId) throw new Error("Chat Room ID is missing");
+      if (!customChatId) throw new Error("Chat Room ID is missing");
 
       let isForwarded = false;
       if (is_forwarded == true || is_forwarded === "true") {
@@ -87,11 +85,10 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
           }))
         : undefined;
 
-      // MongoDB তে মেসেজ সেভ করা
+      // [Step 2] Save to DB (Internal UUIDs only)
       const savedMessage = await saveMessageToDB(
-        chatRoomId,
         cleanSenderId,
-        activeChatId,
+        customChatId,
         content,
         messageType,
         mediaType ?? undefined,
@@ -101,9 +98,27 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         isForwarded,
         disappearingDuration,
       );
+      const senderTransferId = socket.data.transferId;
+
+      const formattedPayload = {
+        _id: savedMessage._id,
+        chatId: customChatId,
+        senderId: senderTransferId,
+        content: savedMessage.content,
+        messageType: savedMessage.messageType,
+        messageStatus: savedMessage.messageStatus,
+        createdAt: savedMessage.createdAt,
+        updatedAt: savedMessage.updatedAt,
+        is_view_once: savedMessage.is_view_once,
+        is_forwarded: savedMessage.is_forwarded,
+        is_edited: savedMessage.is_edited,
+        isDeleted: savedMessage.isDeleted,
+        replyTo: savedMessage.replyTo,
+        attachments: savedMessage.attachments || [],
+      };
 
       const lastMessagePayload = {
-        chatId: activeChatId,
+        chatId: customChatId, // Custom ID
         lastMessage: {
           content:
             savedMessage.content ||
@@ -116,16 +131,12 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         },
       };
 
-      // 🚀 ROOM BROADCASTING (No Manual Loops!)
-      // socket.to() ব্যবহার করলে যে মেসেজ পাঠিয়েছে সে ছাড়া ওই রুমের বাকি সবাই মেসেজটি পেয়ে যাবে
-      socket.to(activeChatId).emit("receive_private_message", savedMessage);
-      socket.to(activeChatId).emit("last_message_update", lastMessagePayload);
-
-      // যে পাঠিয়েছে তার নিজের সাইডবার আপডেটের জন্য (Optional)
+      // [Step 4] Emitting Custom IDs to UI
+      socket.to(customChatId).emit("receive_private_message", formattedPayload);
+      socket.to(customChatId).emit("last_message_update", lastMessagePayload);
       socket.emit("last_message_update", lastMessagePayload);
 
-      // সফল হলে সেন্ডারকে কলব্যাক দেওয়া
-      if (callback) callback({ success: true, data: savedMessage });
+      if (callback) callback({ success: true, data: formattedPayload });
     } catch (error: any) {
       console.error("Socket Error:", error);
       if (callback) callback({ success: false, message: error.message });
@@ -133,7 +144,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
   });
 
   // ===============================================
-  // ২. Read & Deliver Receipts
+  //  Read & Deliver Receipts
   // ===============================================
   socket.on("message_read", async ({ chatRoomId, senderId }) => {
     try {
@@ -155,7 +166,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
   });
 
   // ===============================================
-  // ৩. Typing Status
+  //  Typing Status
   // ===============================================
   socket.on("typing", ({ chatRoomId }) => {
     socket
@@ -171,10 +182,10 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
   });
 
   // ===============================================
-  // ৪. Edit & Delete Message
+  //  Edit & Delete Message
   // ===============================================
   socket.on(
-    "edit_message", // টাইপো 'edit_messsage' ঠিক করা হলো
+    "edit_message",
     async ({ messageId, newContent, chatRoomId }, callback) => {
       try {
         const isEditMessage = await editMessage(
@@ -224,7 +235,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
   );
 
   // ===============================================
-  // ৫. Star & Reaction
+  //Star & Reaction
   // ===============================================
   socket.on("toggle_star", async ({ chatRoomId, messageId }, callback) => {
     try {

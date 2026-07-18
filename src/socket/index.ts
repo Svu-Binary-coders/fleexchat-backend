@@ -1,63 +1,95 @@
 import { Server } from "socket.io";
 import { Server as HttpServer } from "http";
-import { registerChatHandlers } from "../controllers/privetChat.socket.controllers.js";
 import {
   isUserOnline,
   setUserOffline,
   setUserOnline,
-} from "../redis/presence.redis.js";
-import { verifySocketJWT } from "../validators/verifyJWT.validetor.js";
+} from "../redis/chat/presence.redis.js";
+import { verifySocketJWT } from "./../middleware/auth/jwtValidate.middleware.js";
+import { registerChatHandlers } from "../controllers/socket/privetChat.socket.controllers.js";
+import { supabase } from "../config/supabase.config.js";
+
+const HEARTBEAT_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes — presence TTL (5 min) এর আগেই রিফ্রেশ করবে
+
 export const initializeSocket = (httpServer: HttpServer) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: ["localhost:3000", "http://localhost:3000"],
+      origin: ["http://localhost:3000"],
       methods: ["GET", "POST"],
       credentials: true,
     },
     transports: ["websocket", "polling"],
   });
-
-  // JWT validetor 
   io.use(verifySocketJWT);
 
-  io.on("connection", (socket) => {
-    socket.on("setup", async (userId: string) => {
-      socket.data.userId = userId.trim(); // Store userId in socket data for later use
-      socket.join(userId.trim());
-      console.log("user Conncted with ID:", userId);
-      await setUserOnline(userId.trim());
-      io.emit("user_online", { userId });
-    });
-    // update online status in redis and notify others
-    socket.on("check_status", async (userId: string, callback) => {
-      const online = await isUserOnline(userId.trim());
-      callback({ online });
-    });
+  io.on("connection", async (socket) => {
+    const userId = socket.data.userId; 
+    const transferId = socket.data.transferId;
 
+    if (!userId || !transferId) {
+      console.log("Disconnecting socket: Missing userId or transferId in JWT");
+      socket.disconnect();
+      return;
+    }
+
+    console.log(`User Connected with ID: ${userId} (Socket: ${socket.id})`);
+
+    socket.join(userId);
+
+    try {
+      const { data: participations, error } = await supabase
+        .from("chat_participants")
+        .select(`chats ( custom_chat_id )`)
+        .eq("user_id", userId);
+
+      if (!error && participations) {
+        participations.forEach((p: any) => {
+          if (p.chats?.custom_chat_id) {
+            socket.join(p.chats.custom_chat_id);
+          }
+        });
+        console.log(
+          `User ${userId} automatically joined ${participations.length} rooms`,
+        );
+      }
+    } catch (dbError) {
+      console.error("Failed to fetch chat rooms for auto-join:", dbError);
+    }
+    await setUserOnline(transferId);
+    io.emit("user_online", { userId: transferId });
+    const heartbeatInterval = setInterval(() => {
+      setUserOnline(transferId).catch((err) =>
+        console.error("Heartbeat setUserOnline failed:", err),
+      );
+    }, HEARTBEAT_INTERVAL_MS);
+
+    socket.on("check_status", async (checkTransferId: string, callback) => {
+      if (!checkTransferId) return;
+      const online = await isUserOnline(checkTransferId.trim());
+      if (callback) callback({ online });
+    });
 
     socket.on("join_chat", (chatId: string) => {
       if (chatId) {
         socket.join(chatId.trim());
-        console.log(`User ${socket.data.userId} joined chat room: ${chatId}`);
+        console.log(`User ${userId} explicitly joined chat room: ${chatId}`);
       }
     });
 
     socket.on("leave_chat", (chatId: string) => {
       if (chatId) {
         socket.leave(chatId.trim());
-        console.log(`User ${socket.data.userId} left chat room: ${chatId}`);
+        console.log(`User ${userId} left chat room: ${chatId}`);
       }
     });
 
-
-    // Register chat handlers for this socket connection
+    // Register Chat Handlers
     registerChatHandlers(io, socket);
 
     socket.on("disconnect", async () => {
-      const userId = socket.data.userId;
-      if (!userId) return;
-      await setUserOffline(userId);
-      io.emit("user_offline", { userId });
+      clearInterval(heartbeatInterval);
+      await setUserOffline(transferId);
+      io.emit("user_offline", { userId: transferId });
       console.log(`User disconnected: ${socket.id}`);
     });
   });

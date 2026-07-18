@@ -6,12 +6,15 @@ import {
   logoutAllSessionsService,
   logoutService,
   logoutSpecificSessionService,
+  UpdateableFields,
+  updateProfileService,
 } from "../services/auth.services.js";
 import { getDeviceInfo } from "../helper/getLocation.helper.js";
 import { addRegisterService, loginService } from "../services/auth.services.js";
 import { JWTExpireTime } from "../enums/auth.enums.js";
 import { generateAccessToken } from "../middleware/auth/genarateAcessTokan.js";
 import { getCookieOptions } from "../config/cookies.config.js";
+import { getBackupData } from "../services/chat/backupKey.services.js";
 
 export const isUserIdAvailable = async (
   req: Request,
@@ -30,6 +33,7 @@ export const isUserIdAvailable = async (
     return res.status(200).json({
       success: true,
       message: "This user ID is available",
+      available: true,
     });
   } catch (err) {
     next(err);
@@ -85,7 +89,7 @@ export const registerUser = async (
     return res.status(201).json({
       success: true,
       message: "User registered successfully",
-      data: result,
+      userId: result.userId,
     });
   } catch (err) {
     next(err);
@@ -114,6 +118,13 @@ export const loginUser = async (
       browser: deviceInfo.browser,
       deviceVendor: deviceInfo.deviceVendor,
     });
+
+    let backupData = null;
+    try {
+      backupData = await getBackupData(loginUser.id);
+    } catch (error) {
+      console.error("Error fetching backup data:", error);
+    }
     const token = await generateAccessToken(
       loginUser.id,
       loginUser.userId,
@@ -132,7 +143,8 @@ export const loginUser = async (
     return res.status(200).json({
       success: true,
       message: "User logged in successfully",
-      data: loginUser,
+      userId: loginUser.userId,
+      backupData,
     });
   } catch (err) {
     next(err);
@@ -150,10 +162,33 @@ export const getUserDetails = async (
     return res.status(200).json({
       success: true,
       message: "User details fetched successfully",
-      data: user,
+      userDetails: user,
     });
   } catch (err) {
     next(err);
+  }
+};
+
+export const updateUserProfileController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const { userId } = res.locals.user;
+  const { userName, bio, website, location } = req.body;
+  try {
+    const updates: UpdateableFields = {};
+
+    if (userName !== undefined) updates.name = userName;
+    if (bio !== undefined) updates.bio = bio;
+    if (website !== undefined) updates.website = website;
+    if (location !== undefined) updates.location = location;
+
+    const user = await updateProfileService(userId, updates);
+
+    res.status(200).json({ success: true, user });
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -187,7 +222,7 @@ export const getAllSessionsController = async (
     return res.status(200).json({
       success: true,
       message: "Sessions fetched successfully",
-      data: sessions,
+      devices: sessions,
     });
   } catch (err) {
     next(err);

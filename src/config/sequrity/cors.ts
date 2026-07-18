@@ -1,6 +1,8 @@
 import cors, { CorsOptions } from "cors";
-
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "localhost:3000")
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS || 
+  "http://localhost:3000,http://127.0.0.1:3000"
+)
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -18,7 +20,7 @@ const corsOptions: CorsOptions = {
   },
   credentials: true, // Allow cookies to be sent in cross-origin requests
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
 
 export const corsMiddleware = cors(corsOptions);

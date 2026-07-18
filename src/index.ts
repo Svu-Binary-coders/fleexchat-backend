@@ -12,9 +12,17 @@ import { corsMiddleware } from "./config/sequrity/cors.js";
 import { loggerMiddleware } from "./config/sequrity/logger.js";
 import { securityMiddleware } from "./config/sequrity/helmet.js";
 import connectDB from "./config/mongoDB.config.js";
-import connectRedis from "./config/redis.config.js";
+import "./config/redis.config.js";
 import authRoutes from "./routes/auth.routes.js";
 import otpRoutes from "./routes/otp.routes.js";
+import uploadRoutes from "./routes/upload.route.js";
+import backupRoutes from "./routes/backup.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
+import accountRoutes from "./routes/accountControllers.routes.js";
+import groupRoutes from "./routes/group/chat.routes.js";
+import { initializeSocket } from "./socket/index.js";
+import { startAllWorkers } from "./worker/index.js";
+import http from "http";
 // Middleware to parse JSON bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -24,14 +32,26 @@ app.use(compressionMiddleware);
 app.use(corsMiddleware);
 app.use(loggerMiddleware);
 app.use(securityMiddleware);
-app.set("trust proxy", 2); // trust first proxy (cloudflare, nginx, etc.)
+app.set("trust proxy", 1); // trust first proxy (cloudflare, nginx, etc.)
 // connct db
 connectDB();
-connectRedis;
 
 // routs
-app.use("/auth", authRoutes);
-app.use("/otp", otpRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/otp", otpRoutes);
+app.use("/api/uploads", uploadRoutes);
+app.use("/api/chats", chatRoutes);
+app.use("/api/backup", backupRoutes);
+app.use("/api/account", accountRoutes);
+app.use("/api/group", groupRoutes);
+
+// init socket
+const server = http.createServer(app);
+const io = initializeSocket(server);
+app.set("io", io);
+
+// workers
+startAllWorkers();
 
 // 404 handler
 app.use((req, res) => {
@@ -48,6 +68,6 @@ app.use(globalErrorHandler);
 
 // Start the server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

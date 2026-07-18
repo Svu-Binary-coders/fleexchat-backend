@@ -52,6 +52,32 @@ export const searchUsersService = async (
     return [];
   }
 
+  if (trimmed.startsWith("@")) {
+    const handleQuery = trimmed.slice(1).trim();
+
+    if (handleQuery.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from("users")
+      .select("transfer_id,user_id, name, profile_image")
+      .ilike("user_id", `${handleQuery}%`)
+      .limit(10);
+    console.log("Searching users by handle:", handleQuery);
+    console.log("Supabase response data:", data);
+    if (error) {
+      console.error("Error searching users by handle:", error.message);
+      throw new ServiceError("Error searching users", 500);
+    }
+
+    return (data ?? []).map((u: any) => ({
+      id: u.transfer_id,
+      userId: u.user_id,
+      name: u.name,
+      profileImage: u.profile_image,
+      similarityScore: 1,
+    }));
+  }
+
   const { data, error } = await supabase.rpc("search_users", {
     search_term: trimmed,
     result_limit: 10,
@@ -63,7 +89,7 @@ export const searchUsersService = async (
   }
 
   return (data ?? []).map((u: any) => ({
-    id: u.id,
+    id: u.transfer_id,
     userId: u.user_id,
     name: u.name,
     profileImage: u.profile_image,
@@ -96,6 +122,7 @@ export const addRegisterService = async (
   if (!isOTPVerified) {
     throw new ServiceError("Email is not verified for registration", 403);
   }
+  const transferId = generateCustomId(15);
 
   const { data: existingEmail, error: emailCheckError } = await supabase
     .from("users")
@@ -120,6 +147,7 @@ export const addRegisterService = async (
       email,
       is_email_verified: true,
       password: hashedPassword,
+      transfer_id: transferId,
       account_status: UserAccountStatus.ACTIVE,
     })
     .select("id, user_id,account_status")
@@ -332,14 +360,76 @@ export const loginService = async (
 export const getUserDetailsService = async (id: string) => {
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, user_id, name, email, last_login, last_logout")
+    .select(
+      " user_id, name,transfer_id, email, profile_image, bio, website, location, created_at, chat_lock_pin, last_login, last_logout",
+    )
     .eq("id", id)
     .maybeSingle();
+
   if (error) {
     console.error("Error fetching user details:", error.message);
     throw new ServiceError("Failed to fetch user details", 500);
   }
-  return user;
+
+  if (!user) {
+    throw new ServiceError("User not found", 404);
+  }
+
+  return {
+    id: user.transfer_id,
+    user_id: user.user_id,
+    name: user.name,
+    email: user.email,
+    profile_image: user.profile_image ?? null,
+    bio: user.bio ?? null,
+    website: user.website ?? null,
+    location: user.location ?? null,
+    created_at: user.created_at,
+    is_chat_lock_enabled: !!user.chat_lock_pin,
+  };
+};
+
+export type UpdateableFields = {
+  name?: string;
+  bio?: string;
+  website?: string;
+  location?: {
+    city: string;
+    country: string;
+    coordinates: {
+      latitude: number;
+      longitude: number;
+    };
+  };
+};
+
+export const updateProfileService = async (
+  userId: string,
+  updates: UpdateableFields,
+) => {
+  if (Object.keys(updates).length === 0) {
+    throw new ServiceError("No fields to update", 400);
+  }
+
+  const { data: user, error } = await supabase
+    .from("users")
+    .update(updates)
+    .eq("id", userId)
+    .select("user_id, name, profile_image, bio, website, location, created_at")
+    .maybeSingle();
+  if (error) {
+    console.error("Error updating user profile:", error.message);
+    throw new ServiceError("Failed to update user profile", 500);
+  }
+  if (!user) {
+    throw new ServiceError("User not found", 404);
+  }
+  const response: any = {};
+  if (updates.name) response.name = user.name;
+  if (updates.bio !== undefined) response.bio = user.bio;
+  if (updates.website !== undefined) response.website = user.website;
+  if (updates.location !== undefined) response.location = user.location;
+  return response;
 };
 
 export const logoutService = async (userId: string, sessionId: string) => {

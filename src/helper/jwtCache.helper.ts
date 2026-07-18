@@ -6,6 +6,8 @@ interface CachedUser {
   customId: string;
   userAccountStatus: string;
   sessionId: string;
+  userName: string;
+  transferId: string;
 }
 
 const CACHE_TTL_SECONDS = 5 * 60; // 5 minutes
@@ -27,8 +29,10 @@ export async function setJWTInRedis(
   userId: string,
   customId: string,
   userAccountStatus: string,
+  userName: string,
+  transferId: string,
 ): Promise<void> {
-  const payload: CachedUser = { userId, customId, userAccountStatus, sessionId };
+  const payload: CachedUser = { userId, customId, userAccountStatus, sessionId, userName, transferId };
   await redis.set(
     `session:${sessionId}`,
     JSON.stringify(payload),

@@ -31,7 +31,7 @@ export interface IChat extends Document {
 export interface IMessage extends Document {
   chatId: string;
   senderId: string;
-  reactions: { userId: Types.ObjectId; reaction: string }[];
+  reactions: { userId: string; reaction: string }[];
   messageType: MessageType;
   content: string;
   attachments?: Types.ObjectId[];

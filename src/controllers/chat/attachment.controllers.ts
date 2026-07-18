@@ -35,7 +35,6 @@ export const confirmAttachmentController = async (
       );
     }
 
-    // ১. MongoDB এর বদলে PostgreSQL থেকে চ্যাট ভেরিফাই করা হচ্ছে
     const { data: chatRoom, error: chatError } = await supabase
       .from("chats")
       .select("id")
@@ -46,7 +45,6 @@ export const confirmAttachmentController = async (
       throw new ServiceError("Chat not found in PostgreSQL", 404);
     }
 
-    // ২. নতুন মেসেজ তৈরি (ObjectId কাস্টিং ছাড়া, কারণ userId ও chatId এখন String)
     if (!messageId) {
       const newMessage = await MessageModel.create({
         chatId: chatId,
@@ -127,7 +125,6 @@ export const confirmAttachmentController = async (
       );
     }
   } catch (error) {
-    //  ROLLBACK LOGIC (এটি একদম ঠিক আছে)
     const { attachments } = req.body;
     if (Array.isArray(attachments)) {
       for (const att of attachments) {
@@ -165,7 +162,6 @@ export const getAttachmentsForChatController = async (
       throw new ServiceError("chatId is required", 400);
     }
 
-    // সার্ভিসটি আমরা আগেই রিফ্যাক্টর করে ক্রস-ডেটাবেস জয়েন (Postgres + Mongo) করেছি
     const attachment = await getAllAttachmentsForChatService(chatId as string);
 
     res.status(200).json({

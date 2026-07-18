@@ -8,6 +8,7 @@ import redis from "../../config/redis.config.js";
 import { ILinkPreview } from "../../interface/chat.interface.js";
 import { Attachment } from "../../models/attachments.model.js";
 import { AttachmentType } from "../../enums/chat.enums.js";
+import { generateCustomId } from "../../helper/genarateSortId.helper.js";
 
 // ================================================================
 // Search users — Supabase
@@ -19,7 +20,6 @@ export const searchUserName = async (q: string, currentUserId: string) => {
     .or(`user_id.ilike.${q}%,email.ilike.${q}%,name.ilike.${q}%`)
     .neq("id", currentUserId)
     .limit(10);
-
   if (error)
     throw new ServiceError(`Error searching users: ${error.message}`, 500);
   return data;
@@ -32,16 +32,6 @@ export const saveChatRoom = async (senderId: string, receiverId: string) => {
   if (senderId === receiverId) {
     throw new ServiceError("Sender and Receiver cannot be the same", 400);
   }
-
-  const { data: receiver, error: receiverError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("id", receiverId)
-    .maybeSingle();
-
-  if (receiverError) throw new ServiceError("Error checking receiver", 500);
-  if (!receiver) throw new ServiceError("Receiver not found", 404);
-
   const { data: existingChat, error: existingError } = await supabase.rpc(
     "find_direct_chat_between",
     { p_user_a: senderId, p_user_b: receiverId },
@@ -109,7 +99,7 @@ async function getUsersByIds(userIds: string[]) {
 
   const { data, error } = await supabase
     .from("users")
-    .select("id, name, profile_image, user_id")
+    .select("id, name, profile_image, transfer_id")
     .in("id", userIds);
 
   if (error)
@@ -132,8 +122,8 @@ export const loadAllChatMessages = async (
 ) => {
   const { data: chatRoom, error: chatError } = await supabase
     .from("chats")
-    .select("id, friend_request_status")
-    .eq("custom_chat_id", roomId)
+    .select("id, custom_chat_id, friend_request_status")
+    .eq("id", roomId)
     .maybeSingle();
 
   if (chatError) throw new ServiceError("Error fetching chat room", 500);
@@ -153,7 +143,7 @@ export const loadAllChatMessages = async (
   if (pError) throw new ServiceError("Error checking participant", 500);
   if (!participant) throw new ServiceError("Not a participant", 403);
 
-  const chatIdStr = chatRoom.id; // Postgres UUID, stored as string in Mongo messages.chatId
+  const chatIdStr = chatRoom.id;
 
   // Mark as read (first page only)
   if (!cursor) {
@@ -181,7 +171,6 @@ export const loadAllChatMessages = async (
     },
     { $sort: { _id: -1 } },
     { $limit: limit + 1 },
-    // replyTo + its attachments (sender lookup done separately below, since users live in Postgres)
     {
       $lookup: {
         from: "messages",
@@ -237,10 +226,13 @@ export const loadAllChatMessages = async (
   ]);
 
   if (rawMessages.length === 0) {
-    return { messages: [], pagination: { hasMore: false, nextCursor: null } };
+    return {
+      messages: [],
+      pagination: { hasMore: false, nextCursor: null },
+      chatInfo: { id: chatRoom.id, customChatId: chatRoom.custom_chat_id },
+    };
   }
 
-  // Collect every sender id we need (main message + replyTo) and batch-fetch from Supabase
   const senderIdSet = new Set<string>();
   rawMessages.forEach((m: any) => {
     if (m.senderId) senderIdSet.add(m.senderId);
@@ -250,12 +242,15 @@ export const loadAllChatMessages = async (
 
   const formattedMessages = rawMessages.map((msg: any) => {
     const senderInfo = msg.senderId ? usersMap.get(msg.senderId) : null;
+
+    msg.chatId = chatRoom.custom_chat_id;
+    msg.senderId = senderInfo?.transfer_id || null;
+
     msg.senderDetails = senderInfo
       ? {
-          _id: senderInfo.id,
+          id: senderInfo.transfer_id,
           userName: senderInfo.name,
           profilePicture: senderInfo.profile_image,
-          customId: senderInfo.user_id,
         }
       : null;
 
@@ -263,9 +258,11 @@ export const loadAllChatMessages = async (
       const replySender = msg.replyTo.senderId
         ? usersMap.get(msg.replyTo.senderId)
         : null;
+      msg.replyTo.senderId = replySender?.transfer_id || null;
+
       msg.replyTo.senderDetails = replySender
         ? {
-            _id: replySender.id,
+            id: replySender.transfer_id,
             userName: replySender.name,
             profilePicture: replySender.profile_image,
           }
@@ -303,7 +300,11 @@ export const loadAllChatMessages = async (
   const reversed = formattedMessages.reverse();
   const nextCursor = hasMore ? (reversed[0]?._id?.toString() ?? null) : null;
 
-  return { messages: reversed, pagination: { hasMore, nextCursor } };
+  return {
+    messages: reversed,
+    pagination: { hasMore, nextCursor },
+    chatInfo: { id: chatRoom.id, customChatId: chatRoom.custom_chat_id },
+  };
 };
 
 // ================================================================
@@ -311,7 +312,6 @@ export const loadAllChatMessages = async (
 // last message + unread count from MongoDB, online status from Redis
 // ================================================================
 export const loadAllContacts = async (userId: string) => {
-  // 1) this user's chats + per-chat flags + chat meta (Supabase)
   const { data: myParticipations, error: partError } = await supabase
     .from("chat_participants")
     .select(
@@ -330,8 +330,8 @@ export const loadAllContacts = async (userId: string) => {
     .filter((p: any) => !p.chats.is_group_chat)
     .map((p: any) => p.chat_id);
 
-  // 2) other participant for direct chats (Supabase)
-  const otherByChat = new Map<string, string>(); // chat_id -> other_user_id
+  // 2) other participant for direct chats
+  const otherByChat = new Map<string, string>();
   if (directChatIds.length > 0) {
     const { data: otherRows } = await supabase
       .from("chat_participants")
@@ -344,43 +344,44 @@ export const loadAllContacts = async (userId: string) => {
     );
   }
 
-  // 3) user info + public key for those "other" users (Supabase)
   const otherUserIds = [...otherByChat.values()];
   const otherUsersMap = new Map<string, any>();
   if (otherUserIds.length > 0) {
     const { data: otherUsers } = await supabase
       .from("users")
-      .select("id, name, profile_image, user_id, backup_keys(public_key_64)")
+      .select(
+        "id, transfer_id, name, profile_image, user_id, backup_keys(public_key_64)",
+      )
       .in("id", otherUserIds);
 
     (otherUsers ?? []).forEach((u: any) => otherUsersMap.set(u.id, u));
   }
 
-  // 4) all group members for group chats (Supabase)
   const groupMembersByChat = new Map<string, any[]>();
   if (groupChatIds.length > 0) {
     const { data: groupMembers } = await supabase
       .from("chat_participants")
-      .select("chat_id, users(id, name, profile_image, user_id)")
+      .select(
+        "id, chat_id, users(id, transfer_id, name, profile_image, user_id)",
+      )
       .in("chat_id", groupChatIds);
 
     (groupMembers ?? []).forEach((m: any) => {
       const list = groupMembersByChat.get(m.chat_id) ?? [];
-      list.push(m.users);
+      list.push({
+        id: m.users.transfer_id,
+        name: m.users.name,
+        avatar: m.users.profile_image,
+        customId: m.users.user_id,
+      });
       groupMembersByChat.set(m.chat_id, list);
     });
   }
 
-  // 5) last message per chat (MongoDB)
   const lastMessages = await MessageModel.aggregate([
     { $match: { chatId: { $in: chatIds }, isDeleted: false } },
     { $sort: { chatId: 1, createdAt: -1 } },
-    {
-      $group: {
-        _id: "$chatId",
-        doc: { $first: "$$ROOT" },
-      },
-    },
+    { $group: { _id: "$chatId", doc: { $first: "$$ROOT" } } },
     {
       $project: {
         _id: "$doc._id",
@@ -395,7 +396,6 @@ export const loadAllContacts = async (userId: string) => {
   const lastMessageByChat = new Map<string, any>();
   lastMessages.forEach((m: any) => lastMessageByChat.set(m.chatId, m));
 
-  // 6) unread count per chat, for this user (MongoDB)
   const unreadCounts = await MessageModel.aggregate([
     {
       $match: {
@@ -411,7 +411,6 @@ export const loadAllContacts = async (userId: string) => {
   const unreadByChat = new Map<string, number>();
   unreadCounts.forEach((u: any) => unreadByChat.set(u._id, u.count));
 
-  // 7) online status for direct-chat counterparts (Redis)
   const pipeline = redis.pipeline();
   directChatIds.forEach((chatId: string) => {
     const otherId = otherByChat.get(chatId) ?? "__dummy__";
@@ -423,7 +422,7 @@ export const loadAllContacts = async (userId: string) => {
     onlineByChat.set(chatId, (onlineResults?.[i]?.[1] as number) === 1);
   });
 
-  // 8) merge everything
+  // 8) merge
   const mapped = myParticipations.map((p: any) => {
     const chat = p.chats;
     let lastMessage = lastMessageByChat.get(p.chat_id) ?? null;
@@ -440,7 +439,7 @@ export const loadAllContacts = async (userId: string) => {
 
     if (chat.is_group_chat) {
       return {
-        _id: chat.id,
+        id: chat.id,
         name: chat.group_name,
         avatar: chat.group_avatar_url || null,
         customChatId: chat.custom_chat_id,
@@ -461,7 +460,7 @@ export const loadAllContacts = async (userId: string) => {
     if (!other) return null;
 
     return {
-      _id: other.id,
+      id: other.transfer_id,
       name: other.name,
       avatar: other.profile_image,
       customId: other.user_id,
@@ -473,7 +472,7 @@ export const loadAllContacts = async (userId: string) => {
       isPinned: p.is_pinned,
       isFavorite: p.is_favorite,
       isChatLock: p.is_locked,
-      publicKey: other.backup_keys?.[0]?.public_key_64 ?? null,
+      publicKey: other.backup_keys?.public_key_64 ?? null,
     };
   });
 
@@ -530,7 +529,7 @@ export const createNewChatRoomServices = async (
     return { chatRoomId: existingChat[0].custom_chat_id };
   }
 
-  const customChatId = crypto.randomUUID();
+  const customChatId = generateCustomId(15);
   const { data: newChat, error: createError } = await supabase
     .from("chats")
     .insert({

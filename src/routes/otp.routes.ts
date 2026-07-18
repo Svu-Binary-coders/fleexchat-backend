@@ -12,10 +12,10 @@ import {
 } from "../validators/otp.vaidetor.js";
 import { validateExpress } from "../validators/validateExpress.validetor.js";
 
-router.post("/send-otp", validateEmailForOTP, validateExpress, sendRegisterOTP);
+router.post("/send-register-otp", validateEmailForOTP, validateExpress, sendRegisterOTP);
 
 router.post(
-  "/verify-otp",
+  "/verify-register-otp",
   validateEmailForOTP,
   verifyOTPValidation,
   validateExpress,

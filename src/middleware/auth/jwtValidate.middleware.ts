@@ -6,6 +6,12 @@ import {
 } from "../../helper/jwtCache.helper.js";
 import { UserAccountStatus } from "../../enums/auth.enums.js";
 import { supabase } from "../../config/supabase.config.js";
+import cookieParser from "cookie-parser";
+
+const COOKIE_SECRET = process.env.COOKIE_SECRET_KEY;
+if (!COOKIE_SECRET) {
+  throw new Error("Cookie secret is not defined in environment variables");
+}
 
 const JWT_SECRET = process.env.ACCESS_TOKEN_SECRET_KEY;
 if (!JWT_SECRET) {
@@ -57,6 +63,8 @@ export const verifyJWTMiddleware = async (
         customId: cachedUser.customId,
         userAccountStatus: cachedUser.userAccountStatus,
         sessionId,
+        userName: cachedUser.userName,
+        transferId: cachedUser.transferId,
       };
       return next();
     }
@@ -66,7 +74,7 @@ export const verifyJWTMiddleware = async (
       await Promise.all([
         supabase
           .from("users")
-          .select("id, user_id, account_status")
+          .select("id, user_id, account_status,name,transfer_id")
           .eq("id", _id)
           .maybeSingle(),
         supabase
@@ -101,18 +109,85 @@ export const verifyJWTMiddleware = async (
     }
 
     // Redis set
-    await setJWTInRedis(sessionId, user.id, user.user_id, user.account_status);
+    await setJWTInRedis(
+      sessionId,
+      user.id,
+      user.user_id,
+      user.account_status,
+      user.name,
+      user.transfer_id,
+    );
 
     res.locals.user = {
       userId: user.id,
       customId: user.user_id,
       userAccountStatus: user.account_status,
       sessionId,
+      userName: user.name,
+      transferId: user.transfer_id,
     };
 
     return next();
   } catch (error) {
     deleteCookies(res);
     return res.status(401).json({ message: "Invalid token", success: false });
+  }
+};
+
+export const verifySocketJWT = async (socket: any, next: any) => {
+  try {
+    const rawCookieHeader = socket.handshake.headers.cookie;
+
+    if (!rawCookieHeader) {
+      return next(new Error("Authentication required: No cookies found"));
+    }
+
+    const cookies: Record<string, string> = {};
+    rawCookieHeader.split(";").forEach((c: string) => {
+      const [key, value] = c.trim().split("=");
+      if (key && value !== undefined) {
+        cookies[key] = decodeURIComponent(value);
+      }
+    });
+    const rawToken = cookies.FCAccessToken;
+
+    if (!rawToken) {
+      return next(new Error("Authentication required: Token missing"));
+    }
+
+    const unsignedToken = cookieParser.signedCookie(rawToken, COOKIE_SECRET);
+
+    if (!unsignedToken || unsignedToken === rawToken) {
+      return next(new Error("Authentication required: Invalid signed cookie"));
+    }
+
+    const req = {
+      signedCookies: { FCAccessToken: unsignedToken },
+    } as any;
+
+    const res = {
+      locals: {},
+      status: () => res,
+      json: () => res,
+      clearCookie: () => {},
+    } as any;
+
+    await verifyJWTMiddleware(req, res, (err?: any) => {
+      if (err) return next(err);
+
+      if (res.locals.user) {
+        socket.data.userId = res.locals.user.userId;
+        socket.data.customId = res.locals.user.customId;
+        socket.data.sessionId = res.locals.user.sessionId;
+        socket.data.userName = res.locals.user.userName;
+        socket.data.transferId = res.locals.user.transferId;
+        return next();
+      }
+
+      return next(new Error("Authentication failed"));
+    });
+  } catch (error) {
+    console.error("Socket Auth Error:", error);
+    return next(new Error("Internal Server Error"));
   }
 };

@@ -51,21 +51,12 @@ export const createBackupKey = async (
 };
 
 export const getBackupData = async (userId: string) => {
-  const { data: user, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (userError) throw new ServiceError("Error checking user", 500);
-  if (!user) throw new ServiceError("User not found", 404);
-
   const { data: backupData, error: backupError } = await supabase
     .from("backup_keys")
     .select(
       "public_key_64, salt_b64, enc_backup_key_ct_b64, enc_backup_key_iv_b64, is_mfa_enabled, identity_enc_priv_key_b64, identity_priv_key_iv_b64, identity_sig_key_b64, identity_sig_key_iv_b64",
     )
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (backupError) throw new ServiceError("Error fetching backup data", 500);

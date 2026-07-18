@@ -6,13 +6,14 @@ import { Attachment } from "../../models/attachments.model.js";
 import { scheduleLastMessageFlush } from "../../bullMQ/queues/lastMessage.queue.js";
 import { deleteMediaService } from "../upload.services.js";
 import ServiceError from "../../helper/servicesError.helper.js";
+import { getInternalUuid } from "../../redis/getInternalUserUuid.js";
+import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
 // ===============================================
 // 1. Save Message to DB (Cross-Database)
 // ===============================================
 export const saveMessageToDB = async (
-  receiverId: string, // UUID (Optional)
-  senderId: string, // UUID
-  customChatId: string, // Frontend থেকে আসা ID
+  senderId: string,
+  customChatId: string,
   content: string,
   messageType: string,
   mediaType?: string,
@@ -27,7 +28,7 @@ export const saveMessageToDB = async (
     path: string;
     publicId?: string | null;
   }[],
-  replyToMessageId?: string, // MongoDB ObjectId string
+  replyToMessageId?: string,
   is_view_once: boolean = false,
   is_forwarded: boolean = false,
   disappearingDuration?: number,
@@ -36,7 +37,7 @@ export const saveMessageToDB = async (
     .from("chats")
     .select("id, is_group_chat, chat_participants(user_id)")
     .eq("custom_chat_id", customChatId)
-    .single();
+    .maybeSingle();
 
   if (chatError || !chatData) {
     throw new Error("Chat not found for the provided chatId");
@@ -46,10 +47,9 @@ export const saveMessageToDB = async (
   const participants = chatData.chat_participants.map((p: any) => p.user_id);
   const hasAttachments = !!(attachments && attachments.length > 0);
 
-  // ২. MongoDB-তে মেসেজ তৈরি করা
   const newMessage = await MessageModel.create({
-    chatId: postgresChatId, // String (UUID)
-    senderId: senderId, // String (UUID)
+    chatId: postgresChatId,
+    senderId: senderId,
     content,
     is_forwarded,
     is_view_once,
@@ -60,7 +60,6 @@ export const saveMessageToDB = async (
     ...(replyToMessageId && { replyTo: new Types.ObjectId(replyToMessageId) }),
   });
 
-  // ৩. Attachments Save (MongoDB)
   let savedAttachments: any[] = [];
   if (hasAttachments && attachments) {
     const attachmentDocs = await Attachment.insertMany(
@@ -82,17 +81,18 @@ export const saveMessageToDB = async (
 
     savedAttachments = attachmentDocs.map((a) => a.toObject());
     const attachmentIds = attachmentDocs.map((a) => a._id);
-    
+
     await MessageModel.findByIdAndUpdate(newMessage._id, {
       attachments: attachmentIds,
     });
   }
 
-  // 4. ReplyTo — MongoDB থেকে মেসেজ এবং Supabase থেকে ইউজারের ইনফো আনা
   let replyToData = null;
   if (replyToMessageId) {
     const replyMsg = await MessageModel.findById(replyToMessageId)
-      .select("content senderId messageType hasAttachments is_deleted_for_everyone")
+      .select(
+        "content senderId messageType hasAttachments is_deleted_for_everyone",
+      )
       .lean();
 
     if (!replyMsg) throw new Error("Reply target message not found");
@@ -103,23 +103,25 @@ export const saveMessageToDB = async (
       .select("url type mimeType name size duration publicId")
       .lean();
 
-    // Supabase থেকে রিপ্লাই ইউজারের ডিটেইলস
     const { data: replySender } = await supabase
       .from("users")
-      .select("id, name, profile_image")
+      .select("transfer_id, name, profile_image")
       .eq("id", replyMsg.senderId)
       .single();
 
     replyToData = {
       ...replyMsg,
       attachments: replyAttachments,
-      senderDetails: replySender 
-        ? { _id: replySender.id, userName: replySender.name, profilePicture: replySender.profile_image }
+      senderDetails: replySender
+        ? {
+            _id: replySender.transfer_id,
+            userName: replySender.name,
+            profilePicture: replySender.profile_image,
+          }
         : null,
     };
   }
 
-  // BullMQ তে Last Message Flush ট্রিগার করা
   await scheduleLastMessageFlush(customChatId, newMessage._id.toString());
 
   return {
@@ -136,7 +138,11 @@ export const saveMessageToDB = async (
 // 2. Mark as Delivered & Read
 // ===============================================
 export const markAsDelivered = async (chatRoomId: string, senderId: string) => {
-  const { data: chat } = await supabase.from("chats").select("id").eq("custom_chat_id", chatRoomId).single();
+  const { data: chat } = await supabase
+    .from("chats")
+    .select("id")
+    .eq("custom_chat_id", chatRoomId)
+    .single();
   if (!chat) throw new Error("Chat not found");
 
   await MessageModel.updateMany(
@@ -149,8 +155,16 @@ export const markAsDelivered = async (chatRoomId: string, senderId: string) => {
   );
 };
 
-export const markAsRead = async (chatRoomId: string, senderId: string, readerId: string) => {
-  const { data: chat } = await supabase.from("chats").select("id").eq("custom_chat_id", chatRoomId).single();
+export const markAsRead = async (
+  chatRoomId: string,
+  senderId: string,
+  readerId: string,
+) => {
+  const { data: chat } = await supabase
+    .from("chats")
+    .select("id")
+    .eq("custom_chat_id", chatRoomId)
+    .single();
   if (!chat) return;
 
   await MessageModel.updateMany(
@@ -168,7 +182,11 @@ export const markAsRead = async (chatRoomId: string, senderId: string, readerId:
 };
 
 export const markAllAsRead = async (chatRoomId: string, senderId: string) => {
-  const { data: chat } = await supabase.from("chats").select("id").eq("custom_chat_id", chatRoomId).single();
+  const { data: chat } = await supabase
+    .from("chats")
+    .select("id")
+    .eq("custom_chat_id", chatRoomId)
+    .single();
   if (!chat) return;
 
   await MessageModel.updateMany(
@@ -186,14 +204,18 @@ export const markAllAsRead = async (chatRoomId: string, senderId: string) => {
 // ===============================================
 // 3. Edit Message
 // ===============================================
-export const editMessage = async (chatRoomId: string, messageId: string, newContent: string) => {
-  const { data: chat } = await supabase.from("chats").select("id").eq("custom_chat_id", chatRoomId).single();
-  if (!chat) return;
+export const editMessage = async (
+  chatRoomId: string,
+  messageId: string,
+  newContent: string,
+) => {
+  const chatUUId = await getChatSQLId(chatRoomId);
+  if (!chatUUId) return;
 
   const editedMessage = await MessageModel.findOneAndUpdate(
     {
       _id: new Types.ObjectId(messageId),
-      chatId: chat.id,
+      chatId: chatUUId,
     },
     {
       $set: {
@@ -246,7 +268,11 @@ export const deleteMessage = async (
       throw new Error("Only the sender can delete messages for everyone");
     }
 
-    if (message.hasAttachments && message.attachments && message.attachments.length > 0) {
+    if (
+      message.hasAttachments &&
+      message.attachments &&
+      message.attachments.length > 0
+    ) {
       const attachments = await Attachment.find({
         _id: { $in: message.attachments },
       }).select("type provider publicId path");
@@ -301,7 +327,10 @@ export const deleteMessage = async (
 // ===============================================
 // 5. Star / Important Message
 // ===============================================
-export const toggleImportant = async (chatRoomId: string, messageId: string) => {
+export const toggleImportant = async (
+  chatRoomId: string,
+  messageId: string,
+) => {
   const { data: chat } = await supabase
     .from("chats")
     .select("id, is_group_chat, chat_participants(user_id)")
@@ -323,7 +352,9 @@ export const toggleImportant = async (chatRoomId: string, messageId: string) => 
   // Find other participant for direct messages
   let receiverId = null;
   if (!chat.is_group_chat) {
-    receiverId = chat.chat_participants.find((p: any) => p.user_id !== message.senderId)?.user_id;
+    receiverId = chat.chat_participants.find(
+      (p: any) => p.user_id !== message.senderId,
+    )?.user_id;
   }
 
   return {
@@ -338,40 +369,34 @@ export const toggleImportant = async (chatRoomId: string, messageId: string) => 
 export const addRecationOnChat = async (
   chatRoomId: string,
   messageId: Types.ObjectId,
-  userId: string, // UUID
+  userId: string,
   reaction: string,
 ) => {
-  const { data: chat } = await supabase.from("chats").select("id").eq("custom_chat_id", chatRoomId).single();
-  if (!chat) throw new ServiceError("Chat not found", 400);
 
+  const chatUUID = await getChatSQLId(chatRoomId);
   const message = await MessageModel.findOne({
     _id: messageId,
-    chatId: chat.id,
+    chatId: chatUUID,
   });
 
   if (!message) {
     throw new ServiceError("Message not found in the specified chat", 400);
   }
 
-  // Mongoose string matching
   const existingReactionIndex = message.reactions.findIndex(
-    (r:any) => r.userId === userId,
+    (r: any) => r.userId === userId,
   );
 
   if (existingReactionIndex > -1) {
     const existingReaction = message.reactions[existingReactionIndex];
     if (existingReaction && existingReaction.reaction === reaction) {
-      // Toggle Off
       message.reactions.splice(existingReactionIndex, 1);
     } else if (existingReaction) {
-      // Replace
-      message.reactions[existingReactionIndex]!.reaction = reaction;
+      existingReaction.reaction = reaction;
     }
   } else {
-    // New Reaction
-    message.reactions.push({ userId: new Types.ObjectId(userId), reaction });
+    message.reactions.push({ userId: userId, reaction });
   }
-
   await message.save();
   return message;
 };
