@@ -7,8 +7,8 @@ export const confirmAttachmentValidator = [
     .withMessage("chatId required")
     .isString()
     .withMessage("Invalid chatId")
-    .isLength({ min: 10, max: 10 })
-    .withMessage("chatId must be exactly 10 characters"),
+    .isLength({ min: 15, max: 15 })
+    .withMessage("chatId must be exactly 15 characters"),
 
   body("text")
     .optional()

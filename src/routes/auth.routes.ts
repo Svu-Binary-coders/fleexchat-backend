@@ -6,6 +6,7 @@ import {
   loginUser,
   getUserDetails,
   logoutUser,
+  clearCookiesController,
   logoutSpecificSessionController,
   updateUserProfileController,
   getAllSessionsController,
@@ -37,6 +38,7 @@ router.patch(
 );
 
 router.delete("/logout", verifyJWTMiddleware, logoutUser);
+router.delete("/clear-cookies", verifyJWTMiddleware, clearCookiesController);
 router.delete(
   "/delete-session/:sessionId",
   verifyJWTMiddleware,

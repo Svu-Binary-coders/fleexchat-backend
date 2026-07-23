@@ -210,6 +210,18 @@ export const logoutUser = async (
   }
 };
 
+export const clearCookiesController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  res.clearCookie("FCAccessToken");
+  return res.status(200).json({
+    success: true,
+    message: "Cookies cleared successfully",
+  });
+};
+
 export const getAllSessionsController = async (
   req: Request,
   res: Response,

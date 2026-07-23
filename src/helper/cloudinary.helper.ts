@@ -20,13 +20,26 @@ export const uploadToCloudinary = async (
   resourceType: "image" | "video" = "image",
 ): Promise<{ url: string; publicId: string }> => {
   return new Promise((resolve, reject) => {
+    console.log("DEBUG: File buffer exists?", !!file.buffer);
+    if (!file.buffer) {
+      return reject(new Error("File buffer is missing! Check Multer config."));
+    }
+
+    console.log("DEBUG: Starting Cloudinary upload...");
+
     const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: resourceType },
+      { folder, resource_type: resourceType, timeout: 30000 }, // 30 seconds timeout
       (error, result) => {
-        if (error) reject(error);
-        else resolve({ url: result!.secure_url, publicId: result!.public_id });
+        if (error) {
+          console.error("DEBUG: Cloudinary Error:", error);
+          reject(error);
+        } else {
+          console.log("DEBUG: Cloudinary Success!");
+          resolve({ url: result!.secure_url, publicId: result!.public_id });
+        }
       },
     );
+
     Readable.from(file.buffer).pipe(stream);
   });
 };

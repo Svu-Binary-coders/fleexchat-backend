@@ -379,6 +379,7 @@ export const addRecationOnChat = async (
     chatId: chatUUID,
   });
 
+
   if (!message) {
     throw new ServiceError("Message not found in the specified chat", 400);
   }

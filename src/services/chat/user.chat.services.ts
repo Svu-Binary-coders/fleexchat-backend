@@ -125,7 +125,6 @@ export const loadAllChatMessages = async (
     .select("id, custom_chat_id, friend_request_status")
     .eq("id", roomId)
     .maybeSingle();
-
   if (chatError) throw new ServiceError("Error fetching chat room", 500);
   if (!chatRoom) throw new ServiceError("Chat room not found", 404);
 
@@ -229,7 +228,7 @@ export const loadAllChatMessages = async (
     return {
       messages: [],
       pagination: { hasMore: false, nextCursor: null },
-      chatInfo: { id: chatRoom.id, customChatId: chatRoom.custom_chat_id },
+      chatInfo: { id: chatRoom.custom_chat_id },
     };
   }
 
@@ -237,6 +236,11 @@ export const loadAllChatMessages = async (
   rawMessages.forEach((m: any) => {
     if (m.senderId) senderIdSet.add(m.senderId);
     if (m.replyTo?.senderId) senderIdSet.add(m.replyTo.senderId);
+    if (Array.isArray(m.reactions)) {
+      m.reactions.forEach((r: any) => {
+        if (r.userId) senderIdSet.add(r.userId);
+      });
+    }
   });
   const usersMap = await getUsersByIds([...senderIdSet]);
 
@@ -253,6 +257,17 @@ export const loadAllChatMessages = async (
           profilePicture: senderInfo.profile_image,
         }
       : null;
+
+    // reactions এর ভেতরের internal userId কে transfer_id তে বদলাও
+    if (Array.isArray(msg.reactions) && msg.reactions.length > 0) {
+      msg.reactions = msg.reactions.map((r: any) => {
+        const reactorInfo = usersMap.get(r.userId);
+        return {
+          ...r,
+          userId: reactorInfo?.transfer_id || null,
+        };
+      });
+    }
 
     if (msg.replyTo) {
       const replySender = msg.replyTo.senderId
@@ -303,7 +318,7 @@ export const loadAllChatMessages = async (
   return {
     messages: reversed,
     pagination: { hasMore, nextCursor },
-    chatInfo: { id: chatRoom.id, customChatId: chatRoom.custom_chat_id },
+    chatInfo: { id: chatRoom.custom_chat_id },
   };
 };
 
@@ -441,7 +456,7 @@ export const loadAllContacts = async (userId: string) => {
       return {
         id: chat.id,
         name: chat.group_name,
-        avatar: chat.group_avatar_url || null,
+        profile_image: chat.group_avatar_url || null,
         customChatId: chat.custom_chat_id,
         isGroupChat: true,
         participants: groupMembersByChat.get(p.chat_id) ?? [],
@@ -462,7 +477,7 @@ export const loadAllContacts = async (userId: string) => {
     return {
       id: other.transfer_id,
       name: other.name,
-      avatar: other.profile_image,
+      profile_image: other.profile_image,
       customId: other.user_id,
       customChatId: chat.custom_chat_id,
       isGroupChat: false,

@@ -16,13 +16,14 @@ import {
 import { Types } from "mongoose";
 import { getInternalUuid } from "../../redis/getInternalUserUuid.js";
 import {
+  getOthersUsersProfileService,
   getUserDetailsService,
   searchUsersService,
 } from "../../services/auth.services.js";
 import { getPublicKeyForUser } from "../../services/chat/backupKey.services.js";
 import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
 
-export const getUserDetalis = async (
+export const getUserDetails = async (
   req: Request,
   res: Response,
   next: NextFunction,
@@ -48,10 +49,10 @@ export const getAllChatMessages = async (
   next: NextFunction,
 ) => {
   try {
-    const { roomId, receiverId, userId } = req.params;
+    const { roomId, receiverId } = req.params;
     const { cursor, limit = "20" } = req.query;
-    const getUUID = await getInternalUuid(userId as string);
-    const chatUUID=await getChatSQLId(roomId as string);
+    const userId = res.locals.user.userId;
+    const chatUUID = await getChatSQLId(roomId as string);
     if (!roomId || !receiverId) {
       return res.status(400).json({
         message: "roomId and receiverId are required",
@@ -61,9 +62,8 @@ export const getAllChatMessages = async (
 
     const limitNum = Math.min(50, Math.max(1, parseInt(limit as string) || 20));
 
-    const senderObjectId = getUUID;
     const messagesData = await loadAllChatMessages(
-      senderObjectId,
+      userId,
       chatUUID as string,
       false, // isGroup
       limitNum,
@@ -82,10 +82,9 @@ export const getContacts = async (
   next: NextFunction,
 ) => {
   try {
-    const { userId } = req.params as { userId: string };
-    const getUUID = await getInternalUuid(userId as string);
+    const { userId } = res.locals.user;
 
-    const contacts = await loadAllContacts(getUUID);
+    const contacts = await loadAllContacts(userId);
 
     res.status(200).json({ success: true, contacts });
   } catch (error) {
@@ -132,10 +131,8 @@ export const getUserProfile = async (
   next: NextFunction,
 ) => {
   try {
-    const { userId } = req.params as { userId: string };
-    const getUUID = await getInternalUuid(userId as string);
-    
-    const userProfile = await getUserDetailsService(getUUID);
+    const userId = res.locals.user.userId;
+    const userProfile = await getUserDetailsService(userId);
 
     res.status(200).json({
       success: true,
@@ -167,15 +164,15 @@ export const searchUserNameController = async (
   }
 };
 
-export const viewUserProfile = async (
+export const viewOthersUserProfile = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
     const { userId } = req.params as { userId: string };
-    const getUUID = await getInternalUuid(userId as string);
-    const userProfile = await getUserDetailsService(getUUID);
+    console.log(`Fetching profile for userId: ${userId}`);
+    const userProfile = await getOthersUsersProfileService(userId);
     res.status(200).json({ success: true, user: userProfile });
   } catch (error) {
     next(error);

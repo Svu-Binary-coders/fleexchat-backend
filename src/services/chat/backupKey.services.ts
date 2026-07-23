@@ -80,40 +80,26 @@ export const getBackupData = async (userId: string) => {
   };
 };
 
-export const updateBackupKey = async (
+
+export const updateBackupKeyServics = async (
   userId: string,
-  newSaltKey: string,
-  newEncryptedBackupKey: {
-    ctBase64: string;
-    ivBase64: string;
-  },
-) => {
-  const { data: user, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (userError) throw new ServiceError("Error checking user", 500);
-  if (!user) throw new ServiceError("User not found", 404);
-
-  const { data: updated, error: updateError } = await supabase
+  encBackupKey: { ctB64: string; ivB64: string },
+  saltB64: string,
+): Promise<void> => {
+  const { error } = await supabase
     .from("backup_keys")
     .update({
-      salt_b64: newSaltKey,
-      enc_backup_key_ct_b64: newEncryptedBackupKey.ctBase64,
-      enc_backup_key_iv_b64: newEncryptedBackupKey.ivBase64,
+      enc_backup_key_ct_b64: encBackupKey.ctB64,
+      enc_backup_key_iv_b64: encBackupKey.ivB64,
+      salt_b64: saltB64,
     })
-    .eq("user_id", user.id)
-    .select("user_id")
-    .maybeSingle();
+    .eq("user_id", userId);
 
-  if (updateError) throw new ServiceError("Error updating backup key", 500);
-  if (!updated)
-    throw new ServiceError("Backup key document not found to update", 404);
-
-  return true;
+  if (error) {
+    throw new ServiceError("Failed to update backup key", 500);
+  }
 };
+
 
 export const getPublicKeyForUser = async (userId: string) => {
   const { data: user, error: userError } = await supabase

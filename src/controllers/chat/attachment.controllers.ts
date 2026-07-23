@@ -12,7 +12,8 @@ import {
   AttachmentType,
   StorageProvider,
 } from "../../enums/chat.enums.js";
-import { supabase } from "../../config/supabase.config.js"; // <-- Supabase ইমপোর্ট করা হলো
+import { supabase } from "../../config/supabase.config.js";
+import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
 
 export const confirmAttachmentController = async (
   req: Request,
@@ -35,19 +36,14 @@ export const confirmAttachmentController = async (
       );
     }
 
-    const { data: chatRoom, error: chatError } = await supabase
-      .from("chats")
-      .select("id")
-      .eq("id", chatId)
-      .single();
-
-    if (chatError || !chatRoom) {
-      throw new ServiceError("Chat not found in PostgreSQL", 404);
+    const chatUUID = await getChatSQLId(chatId as string);
+    if (!chatUUID) {
+      throw new ServiceError("Invalid chatId provided", 400);
     }
 
     if (!messageId) {
       const newMessage = await MessageModel.create({
-        chatId: chatId,
+        chatId: chatUUID,
         senderId: userId,
         content: text,
         hasAttachments: true,
@@ -58,10 +54,10 @@ export const confirmAttachmentController = async (
     }
 
     const payloads = attachments.map((att: any) => {
-      const validTypes = ["image", "video", "audio", "file"];
+      const validTypes = ["image", "video", "audio", "file", "VoiceMessage"];
       return {
         messageId: new Types.ObjectId(messageId),
-        chatId: chatId, // String (UUID)
+        chatId: chatUUID, // String (UUID)
         uploadedBy: userId, // String (UUID)
         url: att.url,
         type: validTypes.includes(att.type)

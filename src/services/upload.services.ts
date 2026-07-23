@@ -7,6 +7,7 @@ import { supabase } from "../config/supabase.config.js";
 import ServiceError from "../helper/servicesError.helper.js";
 import { Attachment } from "../models/attachments.model.js";
 import { AttachmentType } from "../enums/chat.enums.js";
+import { getChatSQLId } from "../redis/chat/getSQLId.redis.js";
 
 // ==========================================
 // 1. Image Uploads (Server -> Cloudinary)
@@ -56,13 +57,13 @@ export const getSupabaseSignedUrlService = async (
   const filePath = `${folder}/${Date.now()}-${cleanName}`;
 
   const { data, error } = await supabase.storage
-    .from("chat-media")
+    .from("flex-chat")
     .createSignedUploadUrl(filePath);
 
   if (error) throw new ServiceError(`Supabase error: ${error.message}`, 500);
 
   const { data: urlData } = supabase.storage
-    .from("chat-media")
+    .from("flex-chat")
     .getPublicUrl(data.path);
 
   return {
@@ -207,17 +208,9 @@ export const deleteMediaService = async (
 };
 
 export const getAllAttachmentsForChatService = async (chatId: string) => {
-  const { data: chat, error } = await supabase
-    .from("chats")
-    .select("id")
-    .eq("id", chatId)
-    .single();
+  const chatUUID = await getChatSQLId(chatId);
 
-  if (error || !chat) {
-    throw new ServiceError("Chat not found", 404);
-  }
-
-  const attachments = await Attachment.find({ chatId: chatId })
+  const attachments = await Attachment.find({ chatId: chatUUID })
     .sort({ createdAt: -1 })
     .select("uploadedBy url type name size mimeType createdAt -_id")
     .lean();

@@ -150,7 +150,7 @@ export const addRegisterService = async (
       transfer_id: transferId,
       account_status: UserAccountStatus.ACTIVE,
     })
-    .select("id, user_id,account_status")
+    .select("id, user_id,account_status,transfer_id")
     .single();
 
   if (insertError) {
@@ -203,9 +203,9 @@ export const addRegisterService = async (
   await redis.set(`userId:${userId}`, "exists", "EX", 24 * 3600); // Cache for 1 day
 
   const returnedUser = {
-    id: newUser.id,
     userId: newUser.user_id,
     accountStatus: newUser.account_status,
+    id: newUser.transfer_id,
     sessionId: sessionId,
   };
   return returnedUser;
@@ -226,7 +226,7 @@ export const loginService = async (
   const { data: user, error } = await supabase
     .from("users")
     .select(
-      "id, user_id, name, email, password, account_status, login_attempts, locked_until",
+      "id, user_id, name, email, password, account_status, login_attempts, locked_until, transfer_id",
     )
     .eq("email", email)
     .maybeSingle();
@@ -350,7 +350,7 @@ export const loginService = async (
 
   const returnedUser = {
     id: user.id,
-    userId: user.user_id,
+    userId: user.transfer_id,
     accountStatus: user.account_status,
     sessionId: existingSession ? existingSession.session_id : sessionId,
   };
@@ -358,10 +358,11 @@ export const loginService = async (
 };
 
 export const getUserDetailsService = async (id: string) => {
+  console.log(`Fetching user details for ID: ${id}`);
   const { data: user, error } = await supabase
     .from("users")
     .select(
-      " user_id, name,transfer_id, email, profile_image, bio, website, location, created_at, chat_lock_pin, last_login, last_logout",
+      " user_id, name,transfer_id, email, profile_image, bio, website, location, created_at, chat_lock_pin, last_login, last_logout, account_status",
     )
     .eq("id", id)
     .maybeSingle();
@@ -522,4 +523,41 @@ export const logoutSpecificSessionService = async (
   if (!data) {
     throw new ServiceError("Session not found or already logged out", 404);
   }
+};
+
+export const getOthersUsersProfileService = async (userId: string) => {
+  const { data: user, error } = await supabase
+    .from("users")
+    .select(
+      " user_id, name,transfer_id, email, profile_image, bio, website, location, created_at,account_status",
+    )
+    .eq("transfer_id", userId)
+    .maybeSingle();
+
+  console.log(`Fetching users profile: ${user}`);
+
+  if (!user) {
+    throw new ServiceError("User not found", 404);
+  }
+  if (error) {
+    throw new ServiceError("Failed to fetch user details", 500);
+  }
+  if (user.account_status == UserAccountStatus.SUSPENDED) {
+    throw new ServiceError(
+      "Account is suspended. Please contact support.",
+      403,
+    );
+  }
+  return {
+    id: user.transfer_id,
+    user_id: user.user_id,
+    name: user.name,
+    email: user.email,
+    profile_image: user.profile_image ?? null,
+    bio: user.bio ?? null,
+    website: user.website ?? null,
+    location: user.location ?? null,
+    created_at: user.created_at,
+    account_status: user.account_status,
+  };
 };
