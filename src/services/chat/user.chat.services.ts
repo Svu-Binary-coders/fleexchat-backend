@@ -218,6 +218,7 @@ export const loadAllChatMessages = async (
         from: "attachments",
         localField: "_id",
         foreignField: "messageId",
+        pipeline: [{ $project: { __v: 0 } }],
         as: "attachments",
       },
     },
@@ -241,6 +242,16 @@ export const loadAllChatMessages = async (
         if (r.userId) senderIdSet.add(r.userId);
       });
     }
+    if (Array.isArray(m.attachments)) {
+      m.attachments.forEach((att: any) => {
+        if (att.uploadedBy) senderIdSet.add(att.uploadedBy);
+      });
+    }
+    if (Array.isArray(m.replyTo?.attachments)) {
+      m.replyTo.attachments.forEach((att: any) => {
+        if (att.uploadedBy) senderIdSet.add(att.uploadedBy);
+      });
+    }
   });
   const usersMap = await getUsersByIds([...senderIdSet]);
 
@@ -258,13 +269,25 @@ export const loadAllChatMessages = async (
         }
       : null;
 
-    // reactions এর ভেতরের internal userId কে transfer_id তে বদলাও
     if (Array.isArray(msg.reactions) && msg.reactions.length > 0) {
       msg.reactions = msg.reactions.map((r: any) => {
         const reactorInfo = usersMap.get(r.userId);
         return {
           ...r,
           userId: reactorInfo?.transfer_id || null,
+        };
+      });
+    }
+
+    if (Array.isArray(msg.attachments) && msg.attachments.length > 0) {
+      msg.attachments = msg.attachments.map((att: any) => {
+        const uploaderInfo = att.uploadedBy
+          ? usersMap.get(att.uploadedBy)
+          : null;
+        return {
+          ...att,
+          chatId: chatRoom.custom_chat_id,
+          uploadedBy: uploaderInfo?.transfer_id || null,
         };
       });
     }
@@ -282,6 +305,22 @@ export const loadAllChatMessages = async (
             profilePicture: replySender.profile_image,
           }
         : null;
+
+      if (
+        Array.isArray(msg.replyTo.attachments) &&
+        msg.replyTo.attachments.length > 0
+      ) {
+        msg.replyTo.attachments = msg.replyTo.attachments.map((att: any) => {
+          const uploaderInfo = att.uploadedBy
+            ? usersMap.get(att.uploadedBy)
+            : null;
+          return {
+            ...att,
+            chatId: chatRoom.custom_chat_id,
+            uploadedBy: uploaderInfo?.transfer_id || null,
+          };
+        });
+      }
     }
 
     if (msg.is_deleted_for_everyone) {
@@ -728,7 +767,11 @@ type SaveAttachmentPayload = {
   path?: string;
 };
 
-export const saveAttachmentService = async (payload: SaveAttachmentPayload) => {
+export const saveAttachmentService = async (
+  payload: SaveAttachmentPayload,
+  rawChatId: string,
+  transferId: string,
+) => {
   const attachment = await Attachment.create({
     ...payload,
     publicId: payload.publicId ?? null,
@@ -739,7 +782,20 @@ export const saveAttachmentService = async (payload: SaveAttachmentPayload) => {
     $set: { hasAttachments: true },
   });
 
-  return attachment;
+  return {
+    _id: attachment._id,
+    messageId: attachment.messageId,
+    chatId: rawChatId,
+    uploadedBy: transferId,
+    url: attachment.url,
+    type: attachment.type,
+    name: attachment.name,
+    size: attachment.size,
+    mimeType: attachment.mimeType,
+    provider: attachment.provider,
+    publicId: attachment.publicId,
+    duration: attachment.duration,
+  };
 };
 
 // ================================================================

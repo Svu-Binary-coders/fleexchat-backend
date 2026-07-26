@@ -2,13 +2,13 @@ import { Router } from "express";
 import {
   updateAvatarController,
   deleteAvatarController,
-  uploadChatImageController,
-  getVideoSignatureController,
+  getMediaSignatureController,
   getSupabaseSignedUrlController,
   addGroupChatImageController,
   deleteChatImageController,
-} from "../controllers/chat/upload.controllers.js";
-import { uploadImage, uploadMedia } from "../middleware/upload/multer.middleware.js";
+} from "../controllers/upload.controllers.js";
+
+
 import { confirmAttachmentController } from "../controllers/chat/attachment.controllers.js";
 import { confirmAttachmentValidator } from "../validators/attachment.validator.js";
 import { validateExpress } from "../validators/validateExpress.validetor.js";
@@ -16,31 +16,30 @@ import { verifyJWTMiddleware } from "../middleware/auth/jwtValidate.middleware.j
 
 const router = Router();
 
-//  Profile Picture
-router.post(
-  "/avatar",
-  verifyJWTMiddleware,
-  uploadImage.single("avatar"),
-  updateAvatarController,
-);
+// ===============================================
+// 1. Profile Picture (Avatar)
+// ===============================================
+router.post("/avatar", verifyJWTMiddleware, updateAvatarController);
 
 router.delete("/avatar", verifyJWTMiddleware, deleteAvatarController);
 
-router.post(
-  "/chat-image",
-  verifyJWTMiddleware,
-  uploadMedia.single("media"),
-  uploadChatImageController,
-);
+// ===============================================
+// 2. Cloudinary Dynamic Signature (Images, Videos, Avatars)
+// ===============================================
+router.post("/sign-media", verifyJWTMiddleware, getMediaSignatureController);
 
-router.post("/sign-video", verifyJWTMiddleware, getVideoSignatureController);
-
+// ===============================================
+// 3. Supabase Signature (Audio, Files)
+// ===============================================
 router.post(
   "/sign-supabase",
   verifyJWTMiddleware,
   getSupabaseSignedUrlController,
 );
 
+// ===============================================
+// 4. Confirm Chat Attachments
+// ===============================================
 router.post(
   "/confirm-attachment",
   verifyJWTMiddleware,
@@ -49,12 +48,12 @@ router.post(
   confirmAttachmentController,
 );
 
-
-// group chat image
+// ===============================================
+// 5. Group Chat Image
+// ===============================================
 router.post(
   "/group-chat-image/:chatId",
   verifyJWTMiddleware,
-  uploadImage.single("groupChatImage"),
   addGroupChatImageController,
 );
 
@@ -63,6 +62,5 @@ router.delete(
   verifyJWTMiddleware,
   deleteChatImageController,
 );
-
 
 export default router;

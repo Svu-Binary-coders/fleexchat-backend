@@ -149,6 +149,7 @@ export const verifySocketJWT = async (socket: any, next: any) => {
         cookies[key] = decodeURIComponent(value);
       }
     });
+    
     const rawToken = cookies.FCAccessToken;
 
     if (!rawToken) {
@@ -165,26 +166,35 @@ export const verifySocketJWT = async (socket: any, next: any) => {
       signedCookies: { FCAccessToken: unsignedToken },
     } as any;
 
+    let isAuthFailed = false;
     const res = {
       locals: {},
-      status: () => res,
-      json: () => res,
+      status: function () {
+        return this;
+      },
+      json: function (data: any) {
+        isAuthFailed = true;
+        return next(new Error(data?.message || "Authentication failed"));
+      },
       clearCookie: () => {},
     } as any;
 
     await verifyJWTMiddleware(req, res, (err?: any) => {
-      if (err) return next(err);
+      if (isAuthFailed) return; 
 
+      if (err) return next(err);
+      
       if (res.locals.user) {
         socket.data.userId = res.locals.user.userId;
         socket.data.customId = res.locals.user.customId;
         socket.data.sessionId = res.locals.user.sessionId;
         socket.data.userName = res.locals.user.userName;
         socket.data.transferId = res.locals.user.transferId;
+        
         return next();
       }
 
-      return next(new Error("Authentication failed"));
+      return next(new Error("Authentication failed: User data missing"));
     });
   } catch (error) {
     console.error("Socket Auth Error:", error);

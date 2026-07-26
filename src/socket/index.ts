@@ -9,7 +9,7 @@ import { verifySocketJWT } from "./../middleware/auth/jwtValidate.middleware.js"
 import { registerChatHandlers } from "../controllers/socket/privetChat.socket.controllers.js";
 import { supabase } from "../config/supabase.config.js";
 
-const HEARTBEAT_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes — presence TTL (5 min) এর আগেই রিফ্রেশ করবে
+const HEARTBEAT_INTERVAL_MS = 4 * 60 * 1000;
 
 export const initializeSocket = (httpServer: HttpServer) => {
   const io = new Server(httpServer, {

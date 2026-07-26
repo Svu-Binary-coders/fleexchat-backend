@@ -12,7 +12,6 @@ import {
   AttachmentType,
   StorageProvider,
 } from "../../enums/chat.enums.js";
-import { supabase } from "../../config/supabase.config.js";
 import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
 
 export const confirmAttachmentController = async (
@@ -21,7 +20,7 @@ export const confirmAttachmentController = async (
   next: NextFunction,
 ) => {
   try {
-    const { userId } = res.locals.user;
+    const { userId, transferId } = res.locals.user;
     const { chatId, attachments, text = "" } = req.body;
     let { messageId } = req.body;
 
@@ -74,7 +73,9 @@ export const confirmAttachmentController = async (
     });
 
     const savedAttachments = await Promise.all(
-      payloads.map((payload) => saveAttachmentService(payload)),
+      payloads.map((payload) =>
+        saveAttachmentService(payload, chatId as string, transferId),
+      ),
     );
 
     res.status(201).json({
@@ -91,23 +92,36 @@ export const confirmAttachmentController = async (
         const fullMessageResponse = {
           _id: messageId,
           chatId: chatId,
-          senderId: userId,
+          senderId: transferId,
           messageType: MessageType.MEDIA,
           content: text,
           hasAttachments: true,
           attachments: savedAttachments,
           messageStatus: "sent",
           createdAt: new Date().toISOString(),
+          
         };
 
         io.to(chatId).emit("receive_message", fullMessageResponse);
-
+        let msgContent = text;
+        if (!msgContent && savedAttachments.length > 0) {
+          const firstAttachment = savedAttachments[0];
+          if (firstAttachment?.type === "video") {
+            msgContent = "🎥 Video";
+          } else if (firstAttachment?.type === "image") {
+            msgContent = "📷 Image";
+          } else if (firstAttachment?.type === "VoiceMessage") {
+            msgContent = "🎵 Voice Message";
+          } else if (firstAttachment?.type === "audio") {
+            msgContent = "🎵 Audio";
+          } else {
+            msgContent = "📎 Attachment";
+          }
+        }
         io.to(chatId).emit("last_message_update", {
           chatId: chatId,
           lastMessage: {
-            content:
-              text ||
-              (savedAttachments[0]?.type === "video" ? "🎥 Video" : "📷 Image"),
+            content: msgContent,
             createdAt: fullMessageResponse.createdAt,
           },
         });

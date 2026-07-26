@@ -8,6 +8,7 @@ import { deleteMediaService } from "../upload.services.js";
 import ServiceError from "../../helper/servicesError.helper.js";
 import { getInternalUuid } from "../../redis/getInternalUserUuid.js";
 import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
+import { fileDeletionQueue } from "../../bullMQ/queues/fileDeletionQueqe.js";
 // ===============================================
 // 1. Save Message to DB (Cross-Database)
 // ===============================================
@@ -276,26 +277,21 @@ export const deleteMessage = async (
       const attachments = await Attachment.find({
         _id: { $in: message.attachments },
       }).select("type provider publicId path");
-
       await Promise.all(
-        attachments.map(async (attachment) => {
-          if (attachment && attachment.provider) {
-            try {
-              await deleteMediaService(
-                attachment.publicId ?? null,
-                attachment.path ?? null,
-                attachment.provider,
-                attachment.type,
-              );
-            } catch (err) {
-              console.error("Failed to delete media from storage:", err);
-            }
-          }
-        }),
+        attachments.map((attachment) =>
+          fileDeletionQueue.add("delete-file", {
+            fileId: attachment._id.toString(),
+            provider: attachment.provider,
+            publicId: attachment.publicId,
+            path: attachment.path,
+            mediaType: attachment.type,
+          }),
+        ),
       );
 
       await Attachment.deleteMany({ _id: { $in: message.attachments } });
     }
+
     deletedMessage = await MessageModel.findOneAndUpdate(
       { _id: new Types.ObjectId(messageId), chatId: chat.id },
       {

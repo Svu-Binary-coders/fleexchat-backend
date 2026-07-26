@@ -31,7 +31,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         disappearingDuration,
       } = messageData;
 
-      const cleanSenderId = socket.data.userId; // এটি আপনার UUID (DB Logic এর জন্য)
+      const cleanSenderId = socket.data.userId;
 
       const hasAttachment =
         attachment && Array.isArray(attachment) && attachment.length > 0;
@@ -131,8 +131,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         },
       };
 
-      // [Step 4] Emitting Custom IDs to UI
-      socket.to(customChatId).emit("receive_private_message", formattedPayload);
+      socket.to(customChatId).emit("receive_message", formattedPayload);
       socket.to(customChatId).emit("last_message_update", lastMessagePayload);
       socket.emit("last_message_update", lastMessagePayload);
 
@@ -168,16 +167,27 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
   // ===============================================
   //  Typing Status
   // ===============================================
-  socket.on("typing", ({ chatRoomId }) => {
-    socket
-      .to(chatRoomId)
-      .emit("show_typing", { senderId: socket.data.userId, chatRoomId });
+  socket.on("typing", (data: { chatRoomId: string }) => {
+    const { chatRoomId } = data;
+    if (!chatRoomId) return;
+
+    const senderTransferId = socket.data.transferId;
+
+    socket.to(chatRoomId).emit("show_typing", {
+      chatRoomId,
+      senderId: senderTransferId, // ⬅️ "userId" থেকে "senderId"
+    });
   });
 
-  socket.on("stop_typing", ({ chatRoomId }) => {
+  socket.on("stop_typing", (data: { chatRoomId: string }) => {
+    const { chatRoomId } = data;
+    if (!chatRoomId) return;
+
+    const senderTransferId = socket.data.transferId;
+
     socket.to(chatRoomId).emit("hide_typing", {
-      senderId: socket.data.userId,
-      chatRoomId: chatRoomId,
+      chatRoomId,
+      senderId: senderTransferId,
     });
   });
 

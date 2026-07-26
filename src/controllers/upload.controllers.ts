@@ -2,13 +2,12 @@ import { Request, Response, NextFunction } from "express";
 import {
   updateProfilePictureService,
   deleteProfilePictureService,
-  uploadChatImageService,
-  getVideoSignatureService,
   getSupabaseSignedUrlService,
   addGroupChatImageService,
   deleteChatImageService,
-} from "../../services/upload.services.js";
-import ServiceError from "../../helper/servicesError.helper.js";
+  getMediaSignatureService,
+} from "../services/upload.services.js";
+import ServiceError from "../helper/servicesError.helper.js";
 
 // ===============================================
 // 1. User Profile Picture Controllers
@@ -19,18 +18,19 @@ export const updateAvatarController = async (
   next: NextFunction,
 ) => {
   try {
-    const file = req.file;
-    if (!file) throw new ServiceError("No file uploaded", 400);
+    const { url, publicId } = req.body;
+    if (!url || !publicId) {
+      throw new ServiceError("url and publicId are required", 400);
+    }
 
-    // res.locals.user থেকে আসা userId এখন একটি String (PostgreSQL UUID)
     const userId = String(res.locals.user.userId);
-    
-    const { url } = await updateProfilePictureService(file, userId);
+
+    const result = await updateProfilePictureService(userId, url, publicId);
 
     res.status(200).json({
       success: true,
       message: "Profile picture updated successfully",
-      profilePicture: url,
+      profilePicture: result.url,
     });
   } catch (error) {
     next(error);
@@ -56,35 +56,7 @@ export const deleteAvatarController = async (
 };
 
 // ===============================================
-// 2. Chat Image Upload (General)
-// ===============================================
-export const uploadChatImageController = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const file = req.file;
-    if (!file) throw new ServiceError("No file uploaded", 400);
-
-    const { url, publicId } = await uploadChatImageService(file);
-
-    res.status(200).json({
-      success: true,
-      url,
-      publicId,
-      type: "image",
-      name: file.originalname,
-      size: file.size,
-      mimeType: file.mimetype,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// ===============================================
-// 3. Group Chat Image Controllers
+// 2. Group Chat Image Controllers
 // ===============================================
 export const addGroupChatImageController = async (
   req: Request,
@@ -92,24 +64,23 @@ export const addGroupChatImageController = async (
   next: NextFunction,
 ) => {
   try {
-    const file = req.file;
-    if (!file) throw new ServiceError("No file uploaded", 400);
-
+    const { url, publicId } = req.body;
     const chatIdParam = req.params.chatId;
+
     if (!chatIdParam || Array.isArray(chatIdParam)) {
       throw new ServiceError("chatId is required", 400);
     }
+    if (!url || !publicId) {
+      throw new ServiceError("url and publicId are required", 400);
+    }
 
-    const { url, publicId } = await addGroupChatImageService(file, chatIdParam);
+    const result = await addGroupChatImageService(chatIdParam, url, publicId);
 
     res.status(200).json({
       success: true,
-      url,
-      publicId,
+      url: result.url,
+      publicId: result.publicId,
       type: "image",
-      name: file.originalname,
-      size: file.size,
-      mimeType: file.mimetype,
     });
   } catch (error) {
     next(error);
@@ -128,7 +99,7 @@ export const deleteChatImageController = async (
     }
 
     await deleteChatImageService(chatIdParam);
-    
+
     res.status(200).json({
       success: true,
       message: "Group chat image deleted successfully",
@@ -139,21 +110,28 @@ export const deleteChatImageController = async (
 };
 
 // ===============================================
-// 4. Cloudinary Video & Supabase URL Signatures
+// 3. Dynamic Cloudinary Signature Controller
 // ===============================================
-export const getVideoSignatureController = async (
+export const getMediaSignatureController = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { fileSize, fileName } = req.body;
+    const { fileSize, fileName, uploadType } = req.body;
 
-    if (!fileSize || !fileName) {
-      throw new ServiceError("fileSize and fileName are required", 400);
+    if (!fileSize || !fileName || !uploadType) {
+      throw new ServiceError(
+        "fileSize, fileName, and uploadType are required",
+        400,
+      );
     }
 
-    const signData = getVideoSignatureService(Number(fileSize), fileName);
+    const signData = getMediaSignatureService(
+      Number(fileSize),
+      fileName,
+      uploadType,
+    );
 
     res.status(200).json({ success: true, ...signData });
   } catch (error) {
@@ -161,6 +139,9 @@ export const getVideoSignatureController = async (
   }
 };
 
+// ===============================================
+// 4. Supabase URL Signatures
+// ===============================================
 export const getSupabaseSignedUrlController = async (
   req: Request,
   res: Response,
@@ -170,7 +151,10 @@ export const getSupabaseSignedUrlController = async (
     const { fileName, fileType, fileSize } = req.body;
 
     if (!fileName || !fileType || !fileSize) {
-      throw new ServiceError("fileName, fileType, and fileSize are required", 400);
+      throw new ServiceError(
+        "fileName, fileType, and fileSize are required",
+        400,
+      );
     }
 
     if (!["audio", "file"].includes(fileType)) {
@@ -193,7 +177,7 @@ export const getSupabaseSignedUrlController = async (
 };
 
 // ===============================================
-// 5. Generic Upload Confirmation
+// 5. Generic Upload Confirmation (Chat Media)
 // ===============================================
 export const confirmUploadController = async (
   req: Request,
@@ -213,7 +197,10 @@ export const confirmUploadController = async (
 
     // Cloudinary Validation
     if (["video", "image"].includes(type) && !publicId) {
-      throw new ServiceError(`publicId is required for ${type} (Cloudinary)`, 400);
+      throw new ServiceError(
+        `publicId is required for ${type} (Cloudinary)`,
+        400,
+      );
     }
 
     // Supabase Validation

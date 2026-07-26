@@ -1,31 +1,23 @@
 import {
-  uploadToCloudinary,
   deleteFromCloudinary,
-  generateVideoSignature,
+  generateMediaSignature,
 } from "../helper/cloudinary.helper.js";
 import { supabase } from "../config/supabase.config.js";
 import ServiceError from "../helper/servicesError.helper.js";
 import { Attachment } from "../models/attachments.model.js";
 import { AttachmentType } from "../enums/chat.enums.js";
 import { getChatSQLId } from "../redis/chat/getSQLId.redis.js";
+import { MediaTypeEnums } from "../enums/cloud.enums.js";
 
 // ==========================================
-// 1. Image Uploads (Server -> Cloudinary)
+// 1. Cloudinary Signature (For Video & Image)
 // ==========================================
-export const uploadChatImageService = async (
-  file: Express.Multer.File,
-): Promise<{ url: string; publicId: string }> => {
-  if (!file.mimetype.startsWith("image/")) {
-    throw new ServiceError("Only images allowed", 400);
-  }
-  return await uploadToCloudinary(file, "flex-chat/images", "image");
-};
-
-export const getVideoSignatureService = (
+export const getMediaSignatureService = (
   fileSize: number,
   fileName: string,
+  type: (typeof MediaTypeEnums)[keyof typeof MediaTypeEnums],
 ) => {
-  return generateVideoSignature(fileSize, fileName);
+  return generateMediaSignature(fileSize, fileName, type);
 };
 
 // ==========================================
@@ -40,7 +32,6 @@ export const getSupabaseSignedUrlService = async (
     fileType === "audio"
       ? 20 * 1024 * 1024 // 20MB
       : 30 * 1024 * 1024; // 30MB
-
   if (fileSize > maxBytes) {
     throw new ServiceError(
       `File too large. Max: ${maxBytes / 1024 / 1024}MB`,
@@ -74,11 +65,12 @@ export const getSupabaseSignedUrlService = async (
 };
 
 // ==========================================
-// 3. Profile Picture (PostgreSQL)
+// 3. Profile Picture (PostgreSQL) - Confirmation
 // ==========================================
 export const updateProfilePictureService = async (
-  file: Express.Multer.File,
   userId: string,
+  url: string,
+  publicId: string,
 ): Promise<{ url: string; publicId: string }> => {
   const { data: user, error } = await supabase
     .from("users")
@@ -93,12 +85,6 @@ export const updateProfilePictureService = async (
   if (user?.profile_image_key) {
     await deleteFromCloudinary(user.profile_image_key, "image");
   }
-
-  const { url, publicId } = await uploadToCloudinary(
-    file,
-    "flex-chat/avatars",
-    "image",
-  );
 
   await supabase
     .from("users")
@@ -130,11 +116,12 @@ export const deleteProfilePictureService = async (userId: string) => {
 };
 
 // ==========================================
-// 4. Group Chat Images (PostgreSQL)
+// 4. Group Chat Images (PostgreSQL) - Confirmation
 // ==========================================
 export const addGroupChatImageService = async (
-  file: Express.Multer.File,
-  chatId: string, // PostgreSQL UUID
+  chatId: string,
+  url: string,
+  publicId: string,
 ) => {
   const { data: chat, error } = await supabase
     .from("chats")
@@ -149,12 +136,6 @@ export const addGroupChatImageService = async (
   if (chat.group_avatar_key) {
     await deleteFromCloudinary(chat.group_avatar_key, "image");
   }
-
-  const { url, publicId } = await uploadToCloudinary(
-    file,
-    "flex-chat/group-avatars",
-    "image",
-  );
 
   await supabase
     .from("chats")
@@ -207,6 +188,9 @@ export const deleteMediaService = async (
   }
 };
 
+// ==========================================
+// 6. Get All Attachments (MongoDB -> Supabase Lookup)
+// ==========================================
 export const getAllAttachmentsForChatService = async (chatId: string) => {
   const chatUUID = await getChatSQLId(chatId);
 
