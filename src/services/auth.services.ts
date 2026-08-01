@@ -9,9 +9,14 @@ import ServiceError from "../helper/servicesError.helper.js";
 import bcrypt from "bcrypt";
 import { isActionVerified } from "../redis/otp.redis.js";
 import { generateCustomId } from "../helper/genarateSortId.helper.js";
-import { UUID } from "crypto";
 import { SALT_ROUNDS } from "../const/auth.const.js";
 
+/**
+ * Checks if a user ID is available
+ * @param userId - The user ID to check for availability (Transfer ID)
+ * @returns A promise that resolves to true if the user ID is available, false otherwise
+ * @throws ServiceError if there is an error checking the user ID availability
+ */
 export const getUserIdAvailable = async (userId: string): Promise<boolean> => {
   const cached = await redis.exists(`userId:${userId}`);
   if (cached) {
@@ -36,6 +41,12 @@ export const getUserIdAvailable = async (userId: string): Promise<boolean> => {
   return !data;
 };
 
+/**
+ *
+ * @param searchTerm `userName`,`userId` or `email` to search for users
+ * @returns A promise that resolves to an array of user objects containing id, userId, name, profileImage, and similarityScore
+ * @throws ServiceError if there is an error searching for users
+ */
 export const searchUsersService = async (
   searchTerm: string,
 ): Promise<
@@ -97,6 +108,18 @@ export const searchUsersService = async (
   }));
 };
 
+/**
+ * Registers a new user in the system after verifying the OTP and checking for user ID availability.
+ * @param name string - The name of the user to be registered.
+ * @param email - The email address of the user to be registered.
+ * @param password - The password for the user account, which will be hashed before storage.
+ * @param userId - The unique user ID (transfer ID) for the new user, which must be available.
+ * @param fingerPrintId - The fingerprint ID of the device used for registration, which will be logged for activity tracking.
+ * @param ip - The IP address of the device used for registration, which will be logged for activity tracking.
+ * @param deviceInfo - An object containing device information, including OS, device type, browser, and device vendor, which will be logged for activity tracking.
+ * @returns An object containing the new user's transfer ID, account status, and session ID.
+ * @throws ServiceError if the user ID is already taken, the email is not verified, or there is an error during registration.
+ */
 export const addRegisterService = async (
   name: string,
   email: string,
@@ -211,6 +234,16 @@ export const addRegisterService = async (
   return returnedUser;
 };
 
+/**
+ *
+ * @param email - email of the user trying to log in
+ * @param password - password of the user trying to log in
+ * @param fingerPrintId - fingerprint ID of the device used for login
+ * @param ip - IP address of the device used for login
+ * @param deviceInfo - object containing device information
+ * @returns   An object containing the user's transfer ID, account status, and session ID if login is successful
+ * @throws ServiceError if the credentials are invalid, the account is locked or suspended, or there is an error during login
+ */
 export const loginService = async (
   email: string,
   password: string,
@@ -357,6 +390,12 @@ export const loginService = async (
   return returnedUser;
 };
 
+/**
+ * Fetches the details of a user based on their user ID (`UUID ID`).
+ * @param id - The user ID of the user whose details are to be fetched
+ * @returns - An object containing the user's transfer ID, user ID, name, email, profile image, bio, website, location, creation date, and chat lock status
+ * @throws - ServiceError if the user is not found or if there is an error fetching the user details
+ */
 export const getUserDetailsService = async (id: string) => {
   console.log(`Fetching user details for ID: ${id}`);
   const { data: user, error } = await supabase
@@ -404,6 +443,13 @@ export type UpdateableFields = {
   };
 };
 
+/**
+ * User profile update service that updates the user's profile information in the database.
+ * @param userId - The unique identifier (UUID) of the user whose profile is to be updated
+ * @param updates - An object containing the fields to be updated and their new values
+ * @returns - An object containing the updated profile information
+ * @throws - ServiceError if the user is not found or if there is an error updating the profile
+ */
 export const updateProfileService = async (
   userId: string,
   updates: UpdateableFields,
@@ -433,6 +479,11 @@ export const updateProfileService = async (
   return response;
 };
 
+/**
+ * Logs out a user by updating their session status to inactive and recording the logout time in the database.
+ * @param userId - user UUID of the user to be logged out
+ * @param sessionId - The ID of the session to be logged out
+ */
 export const logoutService = async (userId: string, sessionId: string) => {
   const { data, error } = await supabase
     .from("user_activities")
@@ -453,6 +504,12 @@ export const logoutService = async (userId: string, sessionId: string) => {
   }
 };
 
+/**
+ * Get all active sessions for a user, including the current session.
+ * @param userId user UUID of the user whose sessions are to be fetched
+ * @param currentSessionId Current session ID of the user, used to mark the current session in the returned data
+ * @returns An array of session objects containing session details and a flag indicating if it is the current session
+ */
 export const getAllSessionsService = async (
   userId: string,
   currentSessionId: string,
@@ -463,6 +520,7 @@ export const getAllSessionsService = async (
       "id, session_id, login_time, ip_address, fingerprint_id, device_info, location, status, session_expires_at",
     )
     .eq("user_id", userId)
+    .eq("status", UserActivityStatusType.ACTIVE)
     .order("login_time", { ascending: false });
   if (error) {
     throw new ServiceError("Failed to fetch user sessions", 500);
@@ -480,6 +538,12 @@ export const getAllSessionsService = async (
   return sessionsWithCurrentFlag;
 };
 
+/**
+ * User logout service that logs out all sessions for a user except the current session.
+ * @param userId User UUID of the user whose sessions are to be logged out
+ * @param currentSessionId Current session ID of the user, which will not be logged out
+ * @throws ServiceError if there is an error logging out other sessions or if no other sessions are found
+ */
 export const logoutAllSessionsService = async (
   userId: string,
   currentSessionId: string,
@@ -493,6 +557,9 @@ export const logoutAllSessionsService = async (
     .eq("user_id", userId)
     .neq("session_id", currentSessionId)
     .select("id");
+  console.log(
+    `Logging out all sessions for user: ${userId}, excluding session: ${currentSessionId}`,
+  );
 
   if (error) {
     throw new ServiceError("Failed to logout other sessions", 500);
@@ -502,6 +569,12 @@ export const logoutAllSessionsService = async (
   }
 };
 
+/**
+ * Logs out a specific session for a user.
+ * @param userId User UUID of the user whose session is to be logged out
+ * @param sessionId The ID of the session to be logged out
+ * @throws ServiceError if the session is not found or if there is an error logging out the session
+ */
 export const logoutSpecificSessionService = async (
   userId: string,
   sessionId: string,
@@ -516,7 +589,7 @@ export const logoutSpecificSessionService = async (
     .eq("session_id", sessionId)
     .select("id")
     .maybeSingle();
-
+  console.log(`Logging out specific session: ${sessionId} for user: ${userId}`);
   if (error) {
     throw new ServiceError("Failed to logout the specific session", 500);
   }
@@ -525,6 +598,11 @@ export const logoutSpecificSessionService = async (
   }
 };
 
+/**
+ * See other user's profile by their transfer ID.
+ * @param userId user transfer ID of the user whose profile is to be fetched
+ * @returns An object containing the user's transfer ID, user ID, name, email, profile image, bio, website, location, creation date, and account status
+ */
 export const getOthersUsersProfileService = async (userId: string) => {
   const { data: user, error } = await supabase
     .from("users")

@@ -4,11 +4,10 @@ import MessageModel from "../../models/message.model.js";
 import { MessageStatus, MessageType } from "../../enums/chat.enums.js";
 import { Attachment } from "../../models/attachments.model.js";
 import { scheduleLastMessageFlush } from "../../bullMQ/queues/lastMessage.queue.js";
-import { deleteMediaService } from "../upload.services.js";
 import ServiceError from "../../helper/servicesError.helper.js";
-import { getInternalUuid } from "../../redis/getInternalUserUuid.js";
 import { getChatSQLId } from "../../redis/chat/getSQLId.redis.js";
 import { fileDeletionQueue } from "../../bullMQ/queues/fileDeletionQueqe.js";
+
 // ===============================================
 // 1. Save Message to DB (Cross-Database)
 // ===============================================

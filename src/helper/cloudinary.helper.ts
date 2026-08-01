@@ -2,17 +2,14 @@ import cloudinary from "../config/cloudinary.config.js";
 import ServiceError from "./servicesError.helper.js";
 import { MediaTypeEnums } from "../enums/cloud.enums.js";
 
-export const getFileMetadata = (file: Express.Multer.File) => {
-  if (file.mimetype.startsWith("image/"))
-    return {
-      type: MediaTypeEnums.CHAT_IMAGE,
-      folder: "flex-chat/images",
-      resourceType: "image" as const,
-    };
-
-  throw new ServiceError("Unsupported file type for server upload", 400);
-};
-
+/**
+ * Generates a signature for uploading media to Cloudinary
+ * @param fileSize - size of the file in bytes
+ * @param fileName - name of the file
+ * @param uploadType - type of the media being uploaded
+ * @returns an object containing the signature and other required parameters for Cloudinary upload
+ * @see https://cloudinary.com/documentation/image_upload_api_reference#upload_method
+ */
 export const generateMediaSignature = (
   fileSize: number,
   fileName: string,
@@ -59,6 +56,13 @@ export const generateMediaSignature = (
   };
 };
 
+/**
+ * Deletes a media file from Cloudinary
+ * @param publicId - the public ID of the media file to be deleted
+ * @param resourceType - the type of the media file, either "image" or "video"
+ * @returns - the result of the deletion operation
+ * @see https://cloudinary.com/documentation/image_upload_api_reference#destroy_method
+ */
 export const deleteFromCloudinary = async (
   publicId: string,
   resourceType: "image" | "video" = "image",

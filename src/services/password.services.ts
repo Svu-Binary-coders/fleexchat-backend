@@ -3,6 +3,12 @@ import { SALT_ROUNDS } from "../const/auth.const.js";
 import ServiceError from "../helper/servicesError.helper.js";
 import bcrypt from "bcrypt";
 
+/**
+ * Resets the password for a user with the given email address.
+ * @param email User email address for which the password needs to be reset
+ * @param newPassword New password to be set for the user
+ * @throws ServiceError if the user is not found or if there is an error updating the password
+ */
 export const resetPasswordService = async (
   email: string,
   newPassword: string,
@@ -35,6 +41,13 @@ export const resetPasswordService = async (
   }
 };
 
+/**
+ * Changes the password for a user with the given user ID.
+ * @param userId User UUID for which the password needs to be changed
+ * @param currentPassword Current password of the user
+ * @param newPassword New password to be set for the user
+ * @throws ServiceError if the user is not found, the current password is incorrect, or if there is an error updating the password
+ */
 export const changePasswordService = async (
   userId: string,
   currentPassword: string,

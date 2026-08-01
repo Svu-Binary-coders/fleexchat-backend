@@ -26,6 +26,18 @@ export const deleteCookies = (res: Response) => {
   });
 };
 
+/**
+ * Used as middleware to verify JWT tokens in Express routes. It checks for the presence of a signed JWT token in the request cookies, verifies it, and retrieves user information from Redis cache or Supabase database. If the token is valid and the user is active, it attaches user information to `res.locals` for downstream middleware or route handlers.
+ * @param req - Express request object
+ * @param res - Express response object
+ * @param next - Express next function to pass control to the next middleware
+ * @returns Calls `next()` if authentication is successful, otherwise sends an appropriate HTTP response with an error message.
+ * @see https://www.npmjs.com/package/jsonwebtoken
+ * @see https://www.npmjs.com/package/express
+ * @see https://www.npmjs.com/package/cookie-parser
+ * @see https://supabase.com/docs/reference/javascript/supabase-client
+ * @see https://redis.io/docs/
+ */
 export const verifyJWTMiddleware = async (
   req: Request,
   res: Response,
@@ -149,7 +161,7 @@ export const verifySocketJWT = async (socket: any, next: any) => {
         cookies[key] = decodeURIComponent(value);
       }
     });
-    
+
     const rawToken = cookies.FCAccessToken;
 
     if (!rawToken) {
@@ -180,17 +192,17 @@ export const verifySocketJWT = async (socket: any, next: any) => {
     } as any;
 
     await verifyJWTMiddleware(req, res, (err?: any) => {
-      if (isAuthFailed) return; 
+      if (isAuthFailed) return;
 
       if (err) return next(err);
-      
+
       if (res.locals.user) {
         socket.data.userId = res.locals.user.userId;
         socket.data.customId = res.locals.user.customId;
         socket.data.sessionId = res.locals.user.sessionId;
         socket.data.userName = res.locals.user.userName;
         socket.data.transferId = res.locals.user.transferId;
-        
+
         return next();
       }
 

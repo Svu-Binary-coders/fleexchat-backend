@@ -886,8 +886,8 @@ export const verifyChatLockPinService = async (userId: string, pin: string) => {
     .maybeSingle();
 
   if (error) throw new ServiceError("Error checking locked chats", 500);
-  if (!lockedChat)
-    throw new ServiceError("No locked chat found for this user", 404);
+  // If the user has no locked chats, we can return true (no PIN needed)
+  if (!lockedChat) return true;
 
   const { data: user, error: userError } = await supabase
     .from("users")

@@ -3,6 +3,7 @@ import {UAParser} from "ua-parser-js";
 /**
  * @param ipAddress -filter cloudflare ip address and get the real ip address
  * @returns `ipAddress`, `country`, `city`, `latitude`, `longitude`, `timezone`
+ * @see https://www.npmjs.com/package/geoip-lite
  */
 export const getLocation = (ipAddress: string) => {
   if (ipAddress === "::1" || ipAddress === "127.0.0.1") {

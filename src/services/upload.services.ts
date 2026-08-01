@@ -12,6 +12,15 @@ import { MediaTypeEnums } from "../enums/cloud.enums.js";
 // ==========================================
 // 1. Cloudinary Signature (For Video & Image)
 // ==========================================
+
+/**
+ * Use this service to generate a media signature for uploading media files (images or videos) to Cloudinary.
+ * @param fileSize Size of the file in bytes max 20MB for images and 100MB for videos
+ * @param fileName Name of the file to be uploaded
+ * @param type Type of media to be uploaded, either "image" or "video"
+ * @throws ServiceError if the file size exceeds the maximum allowed size for the specified media type
+ * @returns An object containing the media signature and other necessary parameters for uploading the media file to Cloudinary
+ */
 export const getMediaSignatureService = (
   fileSize: number,
   fileName: string,
@@ -23,6 +32,14 @@ export const getMediaSignatureService = (
 // ==========================================
 // 2. Audio/File Uploads (Frontend -> Supabase)
 // ==========================================
+
+/**
+ * Generates a signed URL for uploading files to Supabase storage.
+ * @param {string} fileName Name of the file to be uploaded
+ * @param {string} fileType Type of the file to be uploaded, either "audio" or "file"
+ * @param {number} fileSize Size of the file in bytes
+ * @returns An object containing the signed URL and other necessary parameters for uploading the file to Supabase
+ */
 export const getSupabaseSignedUrlService = async (
   fileName: string,
   fileType: "audio" | "file",
@@ -67,6 +84,15 @@ export const getSupabaseSignedUrlService = async (
 // ==========================================
 // 3. Profile Picture (PostgreSQL) - Confirmation
 // ==========================================
+
+/**
+ * Use this service to update a user's profile picture in the database and delete the previous profile picture from Cloudinary if it exists.
+ * @param userId -  user UUID of the user whose profile picture is to be updated
+ * @param url - new URL of the profile picture to be set for the user
+ * @param publicId - public ID of the new profile picture in Cloudinary
+ * @throws ServiceError if the user is not found or if there is an error updating the profile picture
+ * @returns An object containing the new URL and public ID of the updated profile picture
+ */
 export const updateProfilePictureService = async (
   userId: string,
   url: string,
@@ -94,6 +120,11 @@ export const updateProfilePictureService = async (
   return { url, publicId };
 };
 
+/**
+ * Use this service to delete a user's profile picture from the database and Cloudinary if it exists.
+ * @param userId - user UUID of the user whose profile picture is to be deleted
+ * @throws ServiceError if the user is not found or if there is an error deleting the profile picture
+ */
 export const deleteProfilePictureService = async (userId: string) => {
   const { data: user, error } = await supabase
     .from("users")

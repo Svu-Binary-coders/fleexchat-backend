@@ -28,7 +28,6 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.6.3",
     "morgan": "^1.11.0",
-    "multer": "^2.2.0",
     "nanoid": "^6.0.0",
     "socket.io": "^4.8.3",
     "ua-parser-js": "^2.0.10"
